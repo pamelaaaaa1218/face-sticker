@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>贴纸换脸</title>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 16px 32px; display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 2px 12px rgba(102,126,234,.35);
+    }
+    header h1 { font-size: 20px; font-weight: 800; color: #fff; letter-spacing: -.3px; }
+    header p  { font-size: 12px; color: rgba(255,255,255,.75); margin-top: 2px; }
+
+    /* ── Status ── */
+    #sb {
+      padding: 9px 32px; font-size: 13px; display: flex; align-items: center; gap: 8px;
+      background: #fef9c3; border-bottom: 1px solid #fde047; color: #713f12;
+      transition: background .3s, color .3s;
+    }
+    #sb.ok  { background: #dcfce7; border-color: #86efac; color: #14532d; }
+    #sb.err { background: #fee2e2; border-color: #fca5a5; color: #7f1d1d; }
+    .spin { width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0 }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ── Layout ── */
+    .root { max-width: 1300px; margin: 0 auto; padding: 24px 20px; display: grid; grid-template-columns: 270px 1fr; gap: 20px; }
+    @media(max-width:860px){ .root { grid-template-columns:1fr } }
+
+    /* ── Panel ── */
+    .panel { background:#fff; border-radius:16px; padding:22px; box-shadow:0 1px 8px rgba(0,0,0,.07); }
+    .ptitle { font-size:14px; font-weight:700; color:#374151; margin-bottom:14px; display:flex; align-items:center; gap:6px; }
+
+    /* ── Icon zone ── */
+    #iconZone {
+      border:2px dashed #c4b5fd; border-radius:12px; padding:18px;
+      text-align:center; cursor:pointer; background:#faf5ff;
+      transition:all .2s; user-select:none;
+    }
+    #iconZone:hover { border-color:#7c3aed; background:#f3e8ff; }
+    #iconZone.has { border-style:solid; border-color:#7c3aed; }
+    #iconZone .em { font-size:38px; margin-bottom:6px; }
+    #iconZone img { width:72px; height:72px; object-fit:contain; margin-bottom:6px; border-radius:8px; }
+    #iconZone .hint { font-size:12px; color:#6b7280; line-height:1.5; }
+    #iconZone .hint b { color:#7c3aed; }
+
+    /* ── Sliders ── */
+    .sl { margin-top:14px; }
+    .sl label { font-size:12px; font-weight:600; color:#4b5563; display:flex; justify-content:space-between; margin-bottom:4px; }
+    .sl label em { color:#7c3aed; font-style:normal; font-weight:700; }
+    input[type=range] { width:100%; accent-color:#7c3aed; cursor:pointer; }
+
+    /* ── Steps ── */
+    .steps { font-size:12px; color:#4b5563; line-height:2.2; padding-left:16px; }
+    .steps li b { color:#374151; }
+    .tip-box { background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:10px 12px; font-size:11px; color:#92400e; margin-top:12px; line-height:1.8; }
+
+    /* ── Buttons ── */
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      padding:9px 18px; border-radius:10px; border:none; cursor:pointer;
+      font-size:13px; font-weight:600; transition:all .15s; white-space:nowrap;
+    }
+    .btn:disabled { opacity:.38; cursor:not-allowed; transform:none !important; box-shadow:none !important; }
+    .btn-pu { background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; }
+    .btn-pu:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 5px 16px rgba(102,126,234,.4); }
+    .btn-gr { background:linear-gradient(135deg,#10b981,#059669); color:#fff; }
+    .btn-gr:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 5px 14px rgba(16,185,129,.38); }
+    .btn-wh { background:#f3f4f6; color:#374151; }
+    .btn-wh:hover:not(:disabled) { background:#e5e7eb; }
+    .btn-sm { padding:5px 12px; font-size:12px; border-radius:7px; }
+
+    /* ── Drop zone ── */
+    #dz {
+      border:2px dashed #93c5fd; border-radius:14px; padding:30px 20px;
+      text-align:center; cursor:pointer; background:#eff6ff; transition:all .2s; margin-bottom:18px;
+    }
+    #dz:hover,#dz.over { border-color:#3b82f6; background:#dbeafe; }
+    #dz .di { font-size:34px; margin-bottom:8px; }
+    #dz p  { font-size:13px; color:#6b7280; line-height:1.6; }
+    #dz b  { color:#3b82f6; }
+
+    /* ── Toolbar ── */
+    .tb { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+    .tb-l { display:flex; gap:8px; flex-wrap:wrap; }
+    .cnt { background:#f3f4f6; border-radius:20px; padding:3px 12px; font-size:12px; color:#6b7280; flex-shrink:0; align-self:center; }
+
+    /* ── Gallery ── */
+    #gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+    .empty { grid-column:1/-1; text-align:center; padding:60px 20px; color:#9ca3af; }
+    .empty .ei { font-size:48px; margin-bottom:12px; }
+    .empty p { font-size:14px; }
+
+    /* ── Card ── */
+    .card {
+      background:#fff; border-radius:14px; overflow:hidden;
+      box-shadow:0 2px 8px rgba(0,0,0,.07); border:2px solid transparent;
+      transition:border-color .2s, box-shadow .2s; cursor:pointer;
+      display:flex; flex-direction:column;
+    }
+    .card:hover { border-color:#a78bfa; box-shadow:0 4px 16px rgba(167,139,250,.25); }
+    .card.done-card:hover  { border-color:#6ee7b7; box-shadow:0 4px 16px rgba(16,185,129,.2); }
+    .card.conf-card:hover  { border-color:#fdba74; box-shadow:0 4px 16px rgba(249,115,22,.2); }
+
+    .card-img-wrap { position:relative; background:#111; line-height:0; }
+    .card-img-wrap img,
+    .card-img-wrap canvas { width:100%; max-height:260px; object-fit:contain; display:block; }
+
+    .card-overlay {
+      position:absolute; bottom:0; left:0; right:0;
+      background:linear-gradient(transparent,rgba(0,0,0,.65));
+      padding:20px 10px 8px; display:flex; align-items:center; gap:6px;
+    }
+    .badge { font-size:11px; padding:3px 9px; border-radius:20px; font-weight:700; }
+    .b-wait  { background:rgba(254,243,199,.9); color:#92400e; }
+    .b-det   { background:rgba(219,234,254,.9); color:#1e40af; }
+    .b-sel   { background:rgba(237,233,254,.9); color:#5b21b6; }
+    .b-conf  { background:rgba(255,237,213,.9); color:#9a3412; }
+    .b-done  { background:rgba(209,250,229,.9); color:#065f46; }
+    .b-none  { background:rgba(254,226,226,.9); color:#991b1b; }
+
+    .card-foot { padding:10px 12px; display:flex; align-items:center; gap:8px; }
+    .card-name { flex:1; font-size:12px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    .del-btn {
+      position:absolute; top:7px; right:7px; width:26px; height:26px;
+      border-radius:50%; background:rgba(0,0,0,.55); color:#fff;
+      border:none; cursor:pointer; font-size:15px; line-height:1;
+      display:none; align-items:center; justify-content:center; z-index:2;
+    }
+    .card:hover .del-btn { display:flex; }
+
+    /* ── Modal ── */
+    #modal {
+      display:none; position:fixed; inset:0; z-index:1000;
+      background:rgba(0,0,0,.72); backdrop-filter:blur(4px);
+      align-items:center; justify-content:center; padding:20px;
+    }
+    #modal.open { display:flex; }
+
+    #mbox {
+      background:#fff; border-radius:20px; width:100%;
+      max-width:960px; max-height:92vh;
+      display:flex; flex-direction:column;
+      box-shadow:0 24px 64px rgba(0,0,0,.4);
+      overflow:hidden;
+    }
+
+    #mhead {
+      padding:18px 22px; display:flex; align-items:center; gap:10px;
+      border-bottom:1px solid #f3f4f6; flex-shrink:0;
+    }
+    #mhead h2 { font-size:16px; font-weight:700; flex:1; color:#111; }
+    #mselinfo { font-size:13px; color:#6b7280; white-space:nowrap; }
+    #mclose {
+      width:32px; height:32px; border-radius:8px; border:none;
+      background:#f3f4f6; cursor:pointer; font-size:18px; color:#6b7280;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    #mclose:hover { background:#e5e7eb; color:#374151; }
+
+    #mbody { flex:1; overflow:auto; padding:0; display:flex; align-items:center; justify-content:center; background:#1a1a2e; min-height:0; }
+    #mbody canvas { display:block; max-width:100%; max-height:calc(92vh - 240px); cursor:pointer; user-select:none; }
+
+    /* ── Modal controls (sliders) ── */
+    #mcontrols {
+      padding:12px 22px; background:#f9fafb; border-top:1px solid #f0f0f0;
+      display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; flex-shrink:0;
+    }
+    #mcontrols .mcsl label {
+      font-size:12px; font-weight:600; color:#4b5563;
+      display:flex; justify-content:space-between; margin-bottom:3px;
+    }
+    #mcontrols .mcsl label em { color:#7c3aed; font-style:normal; font-weight:700; }
+    #mcontrols .mcsl input { width:100%; accent-color:#7c3aed; cursor:pointer; }
+    #mno-icon-hint {
+      grid-column:1/-1; text-align:center; font-size:12px; color:#f59e0b;
+      background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:6px 10px;
+    }
+
+    #mfooter {
+      padding:13px 22px; display:flex; align-items:center; justify-content:space-between;
+      border-top:1px solid #f3f4f6; flex-shrink:0; gap:12px; flex-wrap:wrap;
+    }
+    #mhint { font-size:12px; color:#6b7280; flex:1; }
+    .mfoot-r { display:flex; gap:10px; }
+
+    /* Draw-mode toggle */
+    #mdrawbtn {
+      padding:5px 12px; border-radius:8px; border:1.5px solid #d1d5db;
+      background:#fff; color:#4b5563; font-size:12px; font-weight:600;
+      cursor:pointer; transition:all .15s; white-space:nowrap;
+    }
+    #mdrawbtn:hover { border-color:#7c3aed; color:#7c3aed; }
+    #mdrawbtn.active { background:#7c3aed; border-color:#7c3aed; color:#fff; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🎭 贴纸换脸</h1>
+    <p>上传图标 · 自动检测人脸 · 点击选择替换对象 · 纯本地处理</p>
+  </div>
+</header>
+
+<div id="sb"><div class="spin"></div><span id="sm">正在加载人脸检测模型，请稍候…</span></div>
+
+<div class="root">
+
+  <!-- ── 左侧 ── -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel">
+      <div class="ptitle">🎨 贴纸图标</div>
+      <div id="iconZone" onclick="document.getElementById('ii').click()">
+        <div class="em">🐱</div>
+        <div class="hint"><b>点击上传自定义图标</b><br>PNG · GIF · WebP 均可</div>
+      </div>
+      <input type="file" id="ii" accept="image/*" style="display:none"/>
+
+    </div>
+
+    <div class="panel">
+      <div class="ptitle">📋 使用步骤</div>
+      <ol class="steps">
+        <li>上传贴纸图标（右上方）</li>
+        <li>拖入或点击选择照片</li>
+        <li>等待自动人脸检测</li>
+        <li><b>点击卡片</b>打开弹窗，点击脸选/取消</li>
+        <li>弹窗内实时预览，调整大小和偏移</li>
+        <li>点「确认选择」返回，再点「应用贴纸」</li>
+      </ol>
+      <div class="tip-box">
+        💡 检测不到脸？请确保人脸正面清晰、光线充足。侧脸、遮挡较多时可能漏检。
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 右侧 ── -->
+  <div class="panel">
+    <div id="dz" onclick="document.getElementById('pi').click()">
+      <div class="di">📸</div>
+      <p><b>点击选择照片</b>或拖拽到此处</p>
+      <p>JPG · PNG · WebP，支持批量上传</p>
+    </div>
+    <input type="file" id="pi" accept="image/*" multiple style="display:none"/>
+
+    <div class="tb">
+      <div class="tb-l">
+        <button class="btn btn-pu" id="applyAll" disabled>✨ 全部应用贴纸</button>
+        <button class="btn btn-gr"  id="dlAll"    disabled>⬇️ 全部下载</button>
+        <button class="btn btn-wh"  id="clearAll">🗑 清空</button>
+      </div>
+      <span class="cnt" id="cnt">0 张</span>
+    </div>
+
+    <div id="gallery"><div class="empty"><div class="ei">🖼️</div><p>上传照片后显示在这里</p></div></div>
+  </div>
+
+</div>
+
+<!-- ── Modal ── -->
+<div id="modal">
+  <div id="mbox">
+    <div id="mhead">
+      <h2 id="mtitle">选择要贴贴纸的人脸</h2>
+      <span id="mselinfo"></span>
+      <button id="mdrawbtn" onclick="toggleDrawMode()" title="拖拽绘制人脸框；右键删除">✏️ 手动标注</button>
+      <button id="mclose" onclick="closeModal()">✕</button>
+    </div>
+    <div id="mbody">
+      <canvas id="mcv"></canvas>
+    </div>
+    <div id="mcontrols">
+      <div class="mcsl">
+        <label>🔍 图标大小 <em id="msv">120%</em></label>
+        <input type="range" id="msr" min="40" max="220" value="120" step="5"/>
+      </div>
+      <div class="mcsl">
+        <label>🔼 向上偏移 <em id="mov">10%</em></label>
+        <input type="range" id="mor" min="-40" max="60" value="10" step="5"/>
+      </div>
+      <div id="mno-icon-hint" style="display:none">⚠️ 请先在左侧上传贴纸图标，才能预览效果</div>
+    </div>
+    <div id="mfooter">
+      <div id="mhint">选择模式：点击切换贴/跳过 &nbsp;·&nbsp; 标注模式：拖拽添加框，右键删除</div>
+      <div class="mfoot-r">
+        <button class="btn btn-wh" onclick="closeModal()">取消</button>
+        <button class="btn btn-pu" id="mapply">✓ 确认选择</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─── State ─────────────────────────────────────────────────── */
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+let modelReady = false;
+let iconImg    = null;
+let photos     = [];
+let uid        = 0;
+let modalPhoto = null;   // currently open photo
+let hovered    = -1;     // hovered face index in modal
+let drawMode   = false;  // manual annotation mode
+let drawStart  = null;   // {mx,my} where drag started
+let drawing    = null;   // {x,y,w,h} rect being drawn
+
+/* ─── Model ─────────────────────────────────────────────────── */
+async function loadModel() {
+  setStatus('正在加载人脸检测模型，请稍候…');
+  try {
+    const timeout = new Promise((_, rej) =>
+      setTimeout(() => rej(new Error('网络超时')), 20000));
+    await Promise.race([
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+      timeout
+    ]);
+    modelReady = true;
+    setStatus('人脸检测模型已就绪 ✓', 'ok');
+    refreshBtns();
+  } catch(e) {
+    setStatus(
+      `模型加载失败（${e.message}）&nbsp;`
+      + `<button onclick="loadModel()" style="padding:2px 10px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:12px;font-weight:600">🔄 重试</button>`,
+      'err'
+    );
+  }
+}
+loadModel();
+
+function setStatus(msg, cls='') {
+  const b = document.getElementById('sb');
+  b.className = cls;
+  b.innerHTML = (cls==='' ? '<div class="spin"></div>' : cls==='ok' ? '✅' : '❌')
+              + ' <span>' + msg + '</span>';
+}
+
+/* ─── Icon ───────────────────────────────────────────────────── */
+document.getElementById('ii').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    iconImg = img;
+    const z = document.getElementById('iconZone');
+    z.classList.add('has');
+    z.innerHTML = `<img src="${url}"/><div class="hint" style="color:#7c3aed;font-weight:700">${f.name}</div>`;
+    refreshBtns();
+  };
+  img.src = url;
+};
+
+
+/* ─── Upload ─────────────────────────────────────────────────── */
+document.getElementById('pi').onchange = e => { addFiles([...e.target.files]); e.target.value = ''; };
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', ()  => dz.classList.remove('over'));
+dz.addEventListener('drop',      e  => { e.preventDefault(); dz.classList.remove('over'); addFiles([...e.dataTransfer.files].filter(f => f.type.startsWith('image/'))); });
+
+function addFiles(files) {
+  files.forEach(f => {
+    const p = { id: ++uid, file: f, url: URL.createObjectURL(f), img: null, status: 'wait', dets: [], result: null };
+    photos.push(p);
+  });
+  renderGallery();
+  refreshBtns();
+  photos.filter(p => p.status === 'wait').forEach(p => detect(p));
+}
+
+/* ─── Detection helpers: NMS + flip ────────────────────────────── */
+function iou(a, b) {
+  const ix = Math.max(a.x, b.x), iy = Math.max(a.y, b.y);
+  const iw = Math.min(a.x+a.w, b.x+b.w) - ix;
+  const ih = Math.min(a.y+a.h, b.y+b.h) - iy;
+  if (iw <= 0 || ih <= 0) return 0;
+  const inter = iw * ih;
+  return inter / (a.w*a.h + b.w*b.h - inter);
+}
+
+function nms(boxes, thresh = 0.35) {
+  const sorted = [...boxes].sort((a, b) => b.w*b.h - a.w*a.h);
+  const keep = [], used = new Set();
+  for (let i = 0; i < sorted.length; i++) {
+    if (used.has(i)) continue;
+    keep.push(sorted[i]);
+    for (let j = i+1; j < sorted.length; j++)
+      if (iou(sorted[i], sorted[j]) > thresh) used.add(j);
+  }
+  return keep;
+}
+
+/* ─── Detect ─────────────────────────────────────────────────── */
+async function detect(p) {
+  p.status = 'det';
+  renderCard(p);
+
+  await new Promise(resolve => {
+    const img = new Image();
+    img.onload = async () => {
+      p.img = img;
+      try {
+        // Lower threshold catches more distant/partial faces
+        const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 });
+
+        // Pass 1: original image
+        const dets1 = await faceapi.detectAllFaces(img, opts);
+        const boxes1 = dets1.map(d => ({
+          x: Math.round(d.box.x), y: Math.round(d.box.y),
+          w: Math.round(d.box.width), h: Math.round(d.box.height)
+        }));
+
+        // Pass 2: horizontally flipped (catches side-facing profiles)
+        const fc = document.createElement('canvas');
+        fc.width = img.naturalWidth; fc.height = img.naturalHeight;
+        const fctx = fc.getContext('2d');
+        fctx.translate(fc.width, 0); fctx.scale(-1, 1);
+        fctx.drawImage(img, 0, 0);
+        const dets2 = await faceapi.detectAllFaces(fc, opts);
+        const boxes2 = dets2.map(d => ({
+          x: Math.round(img.naturalWidth - d.box.x - d.box.width),
+          y: Math.round(d.box.y),
+          w: Math.round(d.box.width), h: Math.round(d.box.height)
+        }));
+
+        // Merge + NMS to remove duplicates
+        p.dets = nms([...boxes1, ...boxes2]).map(b => ({ ...b, sel: true }));
+      } catch(_) { p.dets = []; }
+      p.status = p.dets.length ? 'sel' : 'none';
+      renderCard(p);
+      refreshBtns();
+      resolve();
+    };
+    img.onerror = () => { p.status = 'none'; renderCard(p); resolve(); };
+    img.src = p.url;
+  });
+}
+
+/* ─── Gallery ────────────────────────────────────────────────── */
+function renderGallery() {
+  const g = document.getElementById('gallery');
+  document.getElementById('cnt').textContent = photos.length + ' 张';
+  if (!photos.length) {
+    g.innerHTML = '<div class="empty"><div class="ei">🖼️</div><p>上传照片后显示在这里</p></div>';
+    return;
+  }
+  g.innerHTML = '';
+  photos.forEach(p => g.appendChild(buildCard(p)));
+}
+
+function renderCard(p) {
+  const old = document.getElementById('c' + p.id);
+  if (old) old.replaceWith(buildCard(p));
+}
+
+function buildCard(p) {
+  const card = document.createElement('div');
+  card.className = 'card' + (p.status === 'done' ? ' done-card' : '') + (p.status === 'confirmed' ? ' conf-card' : '');
+  card.id = 'c' + p.id;
+
+  // Image or canvas
+  const imgWrap = document.createElement('div');
+  imgWrap.className = 'card-img-wrap';
+
+  const displayCanvas = p.result ?? p.previewCanvas;
+  if (displayCanvas) {
+    const cv = document.createElement('canvas');
+    cv.width  = displayCanvas.width;
+    cv.height = displayCanvas.height;
+    cv.getContext('2d').drawImage(displayCanvas, 0, 0);
+    imgWrap.appendChild(cv);
+  } else {
+    const img = document.createElement('img');
+    img.src = p.url;
+    img.alt = p.file.name;
+    imgWrap.appendChild(img);
+  }
+
+  // Overlay badge
+  const ov = document.createElement('div');
+  ov.className = 'card-overlay';
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  if (p.status==='wait') { badge.className+=' b-wait'; badge.textContent='等待检测'; }
+  if (p.status==='det')  { badge.className+=' b-det';  badge.textContent='检测中…'; }
+  if (p.status==='sel')       { badge.className+=' b-sel';  badge.textContent=`${p.dets.length} 张脸 · 点击选择`; }
+  if (p.status==='confirmed') { badge.className+=' b-conf'; badge.textContent=`已选 ${p.dets.filter(d=>d.sel).length} / ${p.dets.length} 张脸`; }
+  if (p.status==='done')      { badge.className+=' b-done'; badge.textContent=`已贴 ${p.dets.filter(d=>d.sel).length} 张脸`; }
+  if (p.status==='none') { badge.className+=' b-none'; badge.textContent='未检测到人脸'; }
+  ov.appendChild(badge);
+  imgWrap.appendChild(ov);
+
+  // Delete btn
+  const del = document.createElement('button');
+  del.className = 'del-btn'; del.textContent = '×';
+  del.onclick = e => { e.stopPropagation(); photos = photos.filter(q => q.id !== p.id); renderGallery(); refreshBtns(); };
+  imgWrap.appendChild(del);
+
+  card.appendChild(imgWrap);
+
+  // Footer
+  const foot = document.createElement('div');
+  foot.className = 'card-foot';
+  const nm = document.createElement('span');
+  nm.className = 'card-name'; nm.title = p.file.name; nm.textContent = p.file.name;
+  foot.appendChild(nm);
+
+  if (p.status === 'sel') {
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'font-size:11px;color:#a78bfa;cursor:pointer;white-space:nowrap;flex-shrink:0';
+    lbl.textContent = '点击选脸 →';
+    lbl.onclick = e => { e.stopPropagation(); openModal(p); };
+    foot.appendChild(lbl);
+  }
+
+  if (p.status === 'confirmed') {
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'btn btn-pu btn-sm';
+    applyBtn.textContent = '✨ 应用贴纸';
+    applyBtn.onclick = e => { e.stopPropagation(); applySticker(p); };
+    foot.appendChild(applyBtn);
+    const reselLbl = document.createElement('span');
+    reselLbl.style.cssText = 'font-size:11px;color:#a78bfa;cursor:pointer;white-space:nowrap;flex-shrink:0';
+    reselLbl.textContent = '重新选脸';
+    reselLbl.onclick = e => { e.stopPropagation(); openModal(p); };
+    foot.appendChild(reselLbl);
+  }
+
+  if (p.status === 'done') {
+    const dl = document.createElement('button');
+    dl.className = 'btn btn-gr btn-sm'; dl.textContent = '⬇ 下载';
+    dl.onclick = e => { e.stopPropagation(); dlOne(p); };
+    foot.appendChild(dl);
+    const reselLbl = document.createElement('span');
+    reselLbl.style.cssText = 'font-size:11px;color:#a78bfa;cursor:pointer;white-space:nowrap;flex-shrink:0';
+    reselLbl.textContent = '重新编辑';
+    reselLbl.onclick = e => { e.stopPropagation(); openModal(p); };
+    foot.appendChild(reselLbl);
+  }
+
+  card.appendChild(foot);
+
+  // Click card → open modal
+  if (p.status === 'sel' || p.status === 'confirmed' || p.status === 'done') {
+    card.onclick = () => openModal(p);
+  }
+
+  return card;
+}
+
+/* ─── Modal ──────────────────────────────────────────────────── */
+const modal   = document.getElementById('modal');
+const mcv     = document.getElementById('mcv');
+const mselinfo = document.getElementById('mselinfo');
+const mapplyBtn = document.getElementById('mapply');
+
+function openModal(p) {
+  modalPhoto = p;
+  hovered    = -1;
+  modal.classList.add('open');
+  document.getElementById('mtitle').textContent =
+    (p.status === 'done' || p.status === 'confirmed') ? '重新调整贴纸' : '预览 & 选择人脸';
+
+  // Init sliders from saved values or defaults
+  const scale  = p.stickerScale  ?? 120;
+  const offset = p.stickerOffset ?? 10;
+  document.getElementById('msr').value = scale;
+  document.getElementById('mor').value = offset;
+  document.getElementById('msv').textContent = scale + '%';
+  document.getElementById('mov').textContent = offset + '%';
+
+  // Show/hide no-icon hint
+  document.getElementById('mno-icon-hint').style.display = iconImg ? 'none' : 'block';
+
+  mcv.width  = p.img.naturalWidth;
+  mcv.height = p.img.naturalHeight;
+  drawModal();
+  updateModalInfo();
+  mapplyBtn.disabled = false;
+}
+
+function closeModal() {
+  modal.classList.remove('open');
+  modalPhoto = null;
+  hovered    = -1;
+  if (drawMode) {
+    drawMode = false; drawStart = null; drawing = null;
+    const btn = document.getElementById('mdrawbtn');
+    btn.classList.remove('active');
+    btn.textContent = '✏️ 手动标注';
+  }
+}
+
+// Close on backdrop click
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+function updateModalInfo() {
+  if (!modalPhoto) return;
+  const n = modalPhoto.dets.length;
+  const s = modalPhoto.dets.filter(d => d.sel).length;
+  mselinfo.textContent = n ? `已选 ${s} / ${n} 张脸` : '未检测到人脸';
+  mapplyBtn.disabled = false;
+}
+
+/* ─── Modal Canvas Draw ──────────────────────────────────────── */
+function getModalScale()  { return parseFloat(document.getElementById('msr').value) / 100; }
+function getModalOffset() { return parseFloat(document.getElementById('mor').value) / 100; }
+
+function drawModal() {
+  if (!modalPhoto) return;
+  const ctx    = mcv.getContext('2d');
+  const scale  = getModalScale();
+  const offPct = getModalOffset();
+  ctx.clearRect(0, 0, mcv.width, mcv.height);
+  ctx.drawImage(modalPhoto.img, 0, 0);
+
+  modalPhoto.dets.forEach((d, i) => {
+    const isHov = i === hovered;
+    const lw = Math.max(3, Math.round(Math.min(d.w, d.h) * 0.04));
+
+    if (d.sel) {
+      if (iconImg) {
+        // ── Preview mode: draw sticker on face ──
+        const iw = d.w * scale;
+        const ih = iw * (iconImg.height / iconImg.width);
+        const ix = d.x + (d.w - iw) / 2;
+        const iy = d.y + (d.h - ih) / 2 - d.h * offPct;
+        ctx.drawImage(iconImg, ix, iy, iw, ih);
+
+        // Subtle green border to show it's selected
+        ctx.strokeStyle = isHov ? '#06d6a0' : 'rgba(16,185,129,0.75)';
+        ctx.lineWidth   = lw;
+        ctx.setLineDash([]);
+        ctx.strokeRect(d.x, d.y, d.w, d.h);
+
+        // Hover: dim overlay + "点击取消" hint
+        if (isHov) {
+          ctx.fillStyle = 'rgba(0,0,0,0.38)';
+          ctx.fillRect(d.x, d.y, d.w, d.h);
+          drawCenterHint(ctx, d, '点击取消');
+        }
+        // Small corner chip
+        drawCornerChip(ctx, d.x, d.y, '✓', '#10b981', d.h);
+      } else {
+        // ── No icon: selection-only view ──
+        ctx.fillStyle = isHov ? 'rgba(16,185,129,.28)' : 'rgba(16,185,129,.15)';
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+        ctx.strokeStyle = isHov ? '#06d6a0' : '#10b981';
+        ctx.lineWidth   = isHov ? lw + 2 : lw;
+        ctx.setLineDash([]);
+        ctx.strokeRect(d.x, d.y, d.w, d.h);
+        drawBadge(ctx, d.x + d.w / 2, d.y, '✓', '#10b981', '#fff', d.h);
+      }
+    } else {
+      // ── Deselected: dark dim + dashed border ──
+      ctx.fillStyle = isHov ? 'rgba(0,0,0,.38)' : 'rgba(0,0,0,.58)';
+      ctx.fillRect(d.x, d.y, d.w, d.h);
+      ctx.strokeStyle = isHov ? '#d1d5db' : '#6b7280';
+      ctx.lineWidth   = lw;
+      ctx.setLineDash([lw * 2, lw]);
+      ctx.strokeRect(d.x, d.y, d.w, d.h);
+      ctx.setLineDash([]);
+      if (isHov) drawCenterHint(ctx, d, '点击添加');
+      drawBadge(ctx, d.x + d.w / 2, d.y, '✕', '#6b7280', '#fff', d.h);
+    }
+  });
+
+  // Draw in-progress rectangle (manual annotation mode)
+  if (drawing && drawing.w > 4 && drawing.h > 4) {
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.strokeRect(drawing.x, drawing.y, drawing.w, drawing.h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(245,158,11,0.12)';
+    ctx.fillRect(drawing.x, drawing.y, drawing.w, drawing.h);
+  }
+}
+
+function drawBadge(ctx, cx, cy, sym, bg, fg, faceH) {
+  const r = Math.max(16, Math.min(28, faceH * 0.13));
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = fg;
+  ctx.font = `bold ${Math.round(r * 1.15)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(sym, cx, cy);
+}
+
+function drawCornerChip(ctx, x, y, sym, color, faceH) {
+  const r = Math.max(12, Math.min(20, faceH * 0.1));
+  const cx = x + r + 4, cy = y + r + 4;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(sym, cx, cy);
+}
+
+function drawCenterHint(ctx, d, text) {
+  const fs = Math.max(13, Math.min(22, d.w * 0.14));
+  ctx.font = `bold ${fs}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(text).width;
+  const ph = fs * 0.45, pw = ph * 1.4;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();
+  ctx.roundRect(d.x + d.w/2 - tw/2 - pw, d.y + d.h/2 - fs/2 - ph, tw + pw*2, fs + ph*2, 6);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, d.x + d.w / 2, d.y + d.h / 2);
+}
+
+/* ─── Modal Interactions ─────────────────────────────────────── */
+function getXY(e) {
+  const r = mcv.getBoundingClientRect();
+  return {
+    mx: (e.clientX - r.left) * (mcv.width  / r.width),
+    my: (e.clientY - r.top)  * (mcv.height / r.height)
+  };
+}
+
+function hitFace(mx, my) {
+  if (!modalPhoto) return -1;
+  for (let i = 0; i < modalPhoto.dets.length; i++) {
+    const {x,y,w,h} = modalPhoto.dets[i];
+    const pad = Math.max(6, w * 0.04);
+    if (mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad) return i;
+  }
+  return -1;
+}
+
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  drawStart = null; drawing = null;
+  const btn = document.getElementById('mdrawbtn');
+  btn.classList.toggle('active', drawMode);
+  btn.textContent = drawMode ? '✏️ 标注中' : '✏️ 手动标注';
+  mcv.style.cursor = drawMode ? 'crosshair' : 'default';
+  if (!drawMode) drawModal();
+}
+
+mcv.addEventListener('mousedown', e => {
+  if (!modalPhoto || !drawMode) return;
+  const {mx, my} = getXY(e);
+  if (hitFace(mx, my) < 0) {           // only start draw on empty area
+    drawStart = {mx, my};
+    drawing   = {x: mx, y: my, w: 0, h: 0};
+  }
+});
+
+mcv.addEventListener('mousemove', e => {
+  if (!modalPhoto) return;
+  const {mx, my} = getXY(e);
+
+  if (drawMode) {
+    if (drawStart) {
+      drawing = {
+        x: Math.min(mx, drawStart.mx), y: Math.min(my, drawStart.my),
+        w: Math.abs(mx - drawStart.mx), h: Math.abs(my - drawStart.my)
+      };
+      drawModal();
+    }
+    mcv.style.cursor = (drawStart || hitFace(mx, my) < 0) ? 'crosshair' : 'pointer';
+  } else {
+    const idx = hitFace(mx, my);
+    mcv.style.cursor = idx >= 0 ? 'pointer' : 'default';
+    if (idx !== hovered) { hovered = idx; drawModal(); }
+  }
+});
+
+mcv.addEventListener('mouseup', e => {
+  if (!modalPhoto) return;
+  const {mx, my} = getXY(e);
+
+  if (drawMode && drawStart) {
+    if (drawing && drawing.w > 25 && drawing.h > 25) {
+      modalPhoto.dets.push({
+        x: Math.round(drawing.x), y: Math.round(drawing.y),
+        w: Math.round(drawing.w), h: Math.round(drawing.h),
+        sel: true, manual: true
+      });
+      updateModalInfo();
+    }
+    drawStart = null; drawing = null;
+    drawModal();
+    return;
+  }
+
+  // Select mode: click to toggle
+  if (!drawMode) {
+    const idx = hitFace(mx, my);
+    if (idx >= 0) {
+      modalPhoto.dets[idx].sel = !modalPhoto.dets[idx].sel;
+      drawModal(); updateModalInfo();
+    }
+  }
+});
+
+mcv.addEventListener('mouseleave', () => {
+  if (hovered !== -1) { hovered = -1; drawModal(); }
+});
+
+// Right-click to delete any face box
+mcv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!modalPhoto) return;
+  const {mx, my} = getXY(e);
+  const idx = hitFace(mx, my);
+  if (idx < 0) return;
+  modalPhoto.dets.splice(idx, 1);
+  if (hovered >= modalPhoto.dets.length) hovered = -1;
+  drawModal(); updateModalInfo();
+});
+
+/* ─── Modal slider live update ───────────────────────────────── */
+document.getElementById('msr').addEventListener('input', function() {
+  document.getElementById('msv').textContent = this.value + '%';
+  drawModal();
+});
+document.getElementById('mor').addEventListener('input', function() {
+  document.getElementById('mov').textContent = this.value + '%';
+  drawModal();
+});
+
+/* ─── Confirm selection (modal → back to card) ───────────────── */
+mapplyBtn.onclick = () => {
+  if (!modalPhoto) return;
+  modalPhoto.stickerScale  = parseFloat(document.getElementById('msr').value);
+  modalPhoto.stickerOffset = parseFloat(document.getElementById('mor').value);
+  modalPhoto.status = 'confirmed';
+  // Render preview immediately so card shows result right away
+  if (iconImg) modalPhoto.previewCanvas = renderStickerCanvas(modalPhoto);
+  const p = modalPhoto;
+  closeModal();
+  renderCard(p);
+  refreshBtns();
+};
+
+/* ─── Render sticker to canvas (shared helper) ───────────────── */
+function renderStickerCanvas(p) {
+  const scale  = (p.stickerScale  ?? 120) / 100;
+  const offPct = (p.stickerOffset ?? 10)  / 100;
+  const cv  = document.createElement('canvas');
+  cv.width  = p.img.naturalWidth;
+  cv.height = p.img.naturalHeight;
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(p.img, 0, 0);
+  p.dets.filter(d => d.sel).forEach(d => {
+    const iw = d.w * scale;
+    const ih = iw * (iconImg.height / iconImg.width);
+    ctx.drawImage(iconImg, d.x + (d.w - iw)/2, d.y + (d.h - ih)/2 - d.h*offPct, iw, ih);
+  });
+  return cv;
+}
+
+/* ─── Apply Sticker (finalize → done) ───────────────────────── */
+function applySticker(p) {
+  if (!iconImg) { alert('请先上传贴纸图标！'); return; }
+  // Reuse already-rendered preview if available, else render fresh
+  p.result = p.previewCanvas ?? renderStickerCanvas(p);
+  p.previewCanvas = null;
+  p.status = 'done';
+  renderCard(p);
+  refreshBtns();
+}
+
+/* ─── Apply All ──────────────────────────────────────────────── */
+document.getElementById('applyAll').onclick = () => {
+  if (!iconImg) { alert('请先上传贴纸图标！'); return; }
+  photos.filter(p => p.status === 'confirmed').forEach(p => applySticker(p));
+};
+
+/* ─── Download ───────────────────────────────────────────────── */
+function dlOne(p) {
+  const a = document.createElement('a');
+  a.download = 'sticker_' + p.file.name.replace(/\.[^.]+$/, '') + '.png';
+  a.href = p.result.toDataURL('image/png');
+  a.click();
+}
+document.getElementById('dlAll').onclick = () =>
+  photos.filter(p => p.status === 'done').forEach((p, i) => setTimeout(() => dlOne(p), i * 200));
+
+document.getElementById('clearAll').onclick = () => { photos = []; renderGallery(); refreshBtns(); };
+
+/* ─── Misc ───────────────────────────────────────────────────── */
+function refreshBtns() {
+  document.getElementById('applyAll').disabled = !modelReady || !iconImg || !photos.some(p => p.status==='confirmed');
+  document.getElementById('dlAll').disabled    = !photos.some(p => p.status==='done');
+}
+
+// Keyboard: Esc closes modal
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeModal(); });
+</script>
+<footer style="text-align:center;padding:18px;font-size:12px;color:#9ca3af;border-top:1px solid #e5e7eb;margin-top:8px;background:#fff;">
+  Copyright © 黄馨萍 · All rights reserved
+</footer>
+</body>
+</html>
