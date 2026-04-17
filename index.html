@@ -199,6 +199,33 @@
     }
     #mdrawbtn:hover { border-color:#7c3aed; color:#7c3aed; }
     #mdrawbtn.active { background:#7c3aed; border-color:#7c3aed; color:#fff; }
+
+    /* ── Per-face controls (red theme) ── */
+    #mperface {
+      padding:12px 22px 14px; background:linear-gradient(135deg,#fff5f5 0%,#fef2f2 100%);
+      border-top:2px solid #fecaca; display:none; flex-shrink:0;
+    }
+    .mperface-head {
+      font-size:13px; font-weight:700; color:#dc2626;
+      display:flex; align-items:center; gap:8px; margin-bottom:10px;
+    }
+    .mperface-head .pf-title {
+      flex:1; display:flex; align-items:center; gap:6px;
+    }
+    .pf-badge {
+      background:#ef4444; color:#fff; font-size:11px; font-weight:800;
+      padding:2px 8px; border-radius:20px; letter-spacing:.3px;
+    }
+    .mperface-head button {
+      padding:4px 12px; border-radius:7px; border:1.5px solid #fca5a5;
+      background:#fff; color:#dc2626; font-size:11px; font-weight:700;
+      cursor:pointer; white-space:nowrap; transition:all .15s;
+      display:flex; align-items:center; gap:4px;
+    }
+    .mperface-head button:hover { background:#fee2e2; border-color:#f87171; }
+    #mperface .mcsl label { color:#991b1b; }
+    #mperface .mcsl label em { color:#ef4444; }
+    #mperface .mcsl input { accent-color:#ef4444; }
   </style>
 </head>
 <body>
@@ -229,7 +256,7 @@
     <div class="panel">
       <div class="ptitle">📋 使用步骤</div>
       <ol class="steps">
-        <li>上传贴纸图标（右上方）</li>
+        <li>上传贴纸图标</li>
         <li>拖入或点击选择照片</li>
         <li>等待自动人脸检测</li>
         <li><b>点击卡片</b>打开弹窗，点击脸选/取消</li>
@@ -288,8 +315,28 @@
       </div>
       <div id="mno-icon-hint" style="display:none">⚠️ 请先在左侧上传贴纸图标，才能预览效果</div>
     </div>
+    <div id="mperface">
+      <div class="mperface-head">
+        <div class="pf-title">
+          <span class="pf-badge">单独调整</span>
+          第 <b id="mpfidx">?</b> 张脸 &nbsp;·&nbsp; 拖动贴纸可移动位置
+        </div>
+        <button onclick="resetFacePos()">↺ 重置位置</button>
+        <button onclick="resetPerFace()">↺ 重置大小</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+        <div class="mcsl">
+          <label>大小（单独）<em id="mpfsv">120%</em></label>
+          <input type="range" id="mpfsr" min="40" max="220" value="120" step="5"/>
+        </div>
+        <div class="mcsl">
+          <label>偏移（单独）<em id="mpfov">10%</em></label>
+          <input type="range" id="mpfor" min="-40" max="60" value="10" step="5"/>
+        </div>
+      </div>
+    </div>
     <div id="mfooter">
-      <div id="mhint">选择模式：点击切换贴/跳过 &nbsp;·&nbsp; 标注模式：拖拽添加框，右键删除</div>
+      <div id="mhint">选择：点击切换贴/跳过 &nbsp;·&nbsp; 移位：拖动贴纸 &nbsp;·&nbsp; 大小：⚙ 单独调整 &nbsp;·&nbsp; 标注：拖拽添加框，右键删除</div>
       <div class="mfoot-r">
         <button class="btn btn-wh" onclick="closeModal()">取消</button>
         <button class="btn btn-pu" id="mapply">✓ 确认选择</button>
@@ -305,11 +352,16 @@ let modelReady = false;
 let iconImg    = null;
 let photos     = [];
 let uid        = 0;
-let modalPhoto = null;   // currently open photo
-let hovered    = -1;     // hovered face index in modal
-let drawMode   = false;  // manual annotation mode
-let drawStart  = null;   // {mx,my} where drag started
-let drawing    = null;   // {x,y,w,h} rect being drawn
+let modalPhoto    = null;  // currently open photo
+let hovered       = -1;   // hovered face index in modal
+let drawMode      = false; // manual annotation mode
+let drawStart     = null;  // {mx,my} where draw-rect drag started
+let drawing       = null;  // {x,y,w,h} rect being drawn
+let adjustFaceIdx = -1;    // index of face being individually size-adjusted (-1 = none)
+let dragFaceIdx   = -1;    // face being position-dragged (-1 = none)
+let dragStart     = null;  // {mx,my,dxPx,dyPx} drag origin
+let isDragging    = false; // mouse moved far enough to be a drag (not a click)
+let prevGlobalScale = 120; // tracks global scale for delta propagation to per-face overrides
 
 /* ─── Model ─────────────────────────────────────────────────── */
 async function loadModel() {
@@ -561,8 +613,12 @@ const mselinfo = document.getElementById('mselinfo');
 const mapplyBtn = document.getElementById('mapply');
 
 function openModal(p) {
-  modalPhoto = p;
-  hovered    = -1;
+  modalPhoto    = p;
+  hovered       = -1;
+  adjustFaceIdx = -1;
+  dragFaceIdx   = -1;
+  dragStart     = null;
+  isDragging    = false;
   modal.classList.add('open');
   document.getElementById('mtitle').textContent =
     (p.status === 'done' || p.status === 'confirmed') ? '重新调整贴纸' : '预览 & 选择人脸';
@@ -574,12 +630,14 @@ function openModal(p) {
   document.getElementById('mor').value = offset;
   document.getElementById('msv').textContent = scale + '%';
   document.getElementById('mov').textContent = offset + '%';
+  prevGlobalScale = scale;
 
   // Show/hide no-icon hint
   document.getElementById('mno-icon-hint').style.display = iconImg ? 'none' : 'block';
 
   mcv.width  = p.img.naturalWidth;
   mcv.height = p.img.naturalHeight;
+  updatePerFacePanel();
   drawModal();
   updateModalInfo();
   mapplyBtn.disabled = false;
@@ -587,8 +645,12 @@ function openModal(p) {
 
 function closeModal() {
   modal.classList.remove('open');
-  modalPhoto = null;
-  hovered    = -1;
+  modalPhoto    = null;
+  hovered       = -1;
+  adjustFaceIdx = -1;
+  dragFaceIdx   = -1;
+  dragStart     = null;
+  isDragging    = false;
   if (drawMode) {
     drawMode = false; drawStart = null; drawing = null;
     const btn = document.getElementById('mdrawbtn');
@@ -615,38 +677,52 @@ function getModalOffset() { return parseFloat(document.getElementById('mor').val
 function drawModal() {
   if (!modalPhoto) return;
   const ctx    = mcv.getContext('2d');
-  const scale  = getModalScale();
-  const offPct = getModalOffset();
   ctx.clearRect(0, 0, mcv.width, mcv.height);
   ctx.drawImage(modalPhoto.img, 0, 0);
 
+  const globalScale  = getModalScale();
+  const globalOffPct = getModalOffset();
+
   modalPhoto.dets.forEach((d, i) => {
-    const isHov = i === hovered;
-    const lw = Math.max(3, Math.round(Math.min(d.w, d.h) * 0.04));
+    const isHov    = i === hovered;
+    const isAdjust = i === adjustFaceIdx;
+    const lw = Math.max(2, Math.min(5, Math.round(Math.min(d.w, d.h) * 0.025)));
+
+    // Per-face overrides or fall back to global
+    const scale  = (d.scaleOv  != null ? d.scaleOv  : globalScale  * 100) / 100;
+    const offPct = (d.offsetOv != null ? d.offsetOv : globalOffPct * 100) / 100;
 
     if (d.sel) {
       if (iconImg) {
         // ── Preview mode: draw sticker on face ──
         const iw = d.w * scale;
         const ih = iw * (iconImg.height / iconImg.width);
-        const ix = d.x + (d.w - iw) / 2;
-        const iy = d.y + (d.h - ih) / 2 - d.h * offPct;
+        const dx = d.dxPx ?? 0, dy = d.dyPx ?? 0;
+        const ix = d.x + (d.w - iw) / 2 + dx;
+        const iy = d.y + (d.h - ih) / 2 - d.h * offPct + dy;
         ctx.drawImage(iconImg, ix, iy, iw, ih);
 
-        // Subtle green border to show it's selected
-        ctx.strokeStyle = isHov ? '#06d6a0' : 'rgba(16,185,129,0.75)';
-        ctx.lineWidth   = lw;
+        // Visual indicator box follows the sticker (shifted by dx/dy)
+        const bx = d.x + dx, by = d.y + dy;
+        const shifted = { x: bx, y: by, w: d.w, h: d.h };
+
+        // Border: red if being adjusted, else green
+        ctx.strokeStyle = isAdjust ? '#ef4444' : (isHov ? '#06d6a0' : 'rgba(16,185,129,0.75)');
+        ctx.lineWidth   = isAdjust ? lw + 2 : lw;
+        ctx.setLineDash(isAdjust ? [lw*2, lw] : []);
+        ctx.strokeRect(bx, by, d.w, d.h);
         ctx.setLineDash([]);
-        ctx.strokeRect(d.x, d.y, d.w, d.h);
 
         // Hover: dim overlay + "点击取消" hint
-        if (isHov) {
+        if (isHov && !isAdjust) {
           ctx.fillStyle = 'rgba(0,0,0,0.38)';
-          ctx.fillRect(d.x, d.y, d.w, d.h);
-          drawCenterHint(ctx, d, '点击取消');
+          ctx.fillRect(bx, by, d.w, d.h);
+          drawCenterHint(ctx, shifted, '点击取消');
         }
         // Small corner chip
-        drawCornerChip(ctx, d.x, d.y, '✓', '#10b981', d.h);
+        drawCornerChip(ctx, bx, by, '✓', isAdjust ? '#ef4444' : '#10b981', d.h);
+        // Gear chip (shown on hover or when this face is being adjusted)
+        if (isHov || isAdjust) drawGearChip(ctx, shifted, isAdjust);
       } else {
         // ── No icon: selection-only view ──
         ctx.fillStyle = isHov ? 'rgba(16,185,129,.28)' : 'rgba(16,185,129,.15)';
@@ -684,17 +760,17 @@ function drawModal() {
 }
 
 function drawBadge(ctx, cx, cy, sym, bg, fg, faceH) {
-  const r = Math.max(16, Math.min(28, faceH * 0.13));
+  const r = Math.max(12, Math.min(18, faceH * 0.09));
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = fg;
-  ctx.font = `bold ${Math.round(r * 1.15)}px sans-serif`;
+  ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(sym, cx, cy);
 }
 
 function drawCornerChip(ctx, x, y, sym, color, faceH) {
-  const r = Math.max(12, Math.min(20, faceH * 0.1));
+  const r = Math.max(9, Math.min(14, faceH * 0.07));
   const cx = x + r + 4, cy = y + r + 4;
   ctx.fillStyle = color;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
@@ -716,6 +792,46 @@ function drawCenterHint(ctx, d, text) {
   ctx.fill();
   ctx.fillStyle = '#fff';
   ctx.fillText(text, d.x + d.w / 2, d.y + d.h / 2);
+}
+
+function gearR(faceH) { return Math.max(11, Math.min(16, faceH * 0.07)); }
+
+function drawGearChip(ctx, d, active) {
+  const r  = gearR(d.h) + (active ? 2 : 0);
+  const cx = d.x + d.w - r - 5;
+  const cy = d.y + r + 5;
+
+  if (active) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(239,68,68,0.65)';
+    ctx.shadowBlur  = 10;
+    ctx.fillStyle   = '#ef4444';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth   = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2.5, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(239,68,68,0.75)';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('⚙', cx, cy);
+}
+
+function hitGearBtn(mx, my) {
+  if (!modalPhoto || !iconImg) return -1;
+  for (let i = 0; i < modalPhoto.dets.length; i++) {
+    const d = modalPhoto.dets[i];
+    if (!d.sel) continue;
+    const r  = gearR(d.h) + (i === adjustFaceIdx ? 2 : 0);
+    const cx = d.x + d.w - r - 5 + (d.dxPx ?? 0);
+    const cy = d.y + r + 5       + (d.dyPx ?? 0);
+    if (Math.sqrt((mx - cx) ** 2 + (my - cy) ** 2) <= r + 5) return i;
+  }
+  return -1;
 }
 
 /* ─── Modal Interactions ─────────────────────────────────────── */
@@ -748,9 +864,24 @@ function toggleDrawMode() {
 }
 
 mcv.addEventListener('mousedown', e => {
-  if (!modalPhoto || !drawMode) return;
+  if (!modalPhoto) return;
+  if (e.button !== 0) return;
+
   const {mx, my} = getXY(e);
-  if (hitFace(mx, my) < 0) {           // only start draw on empty area
+  const hitIdx = hitFace(mx, my);
+  const giIdx  = hitGearBtn(mx, my);
+
+  // Click on any face or its gear chip: track for drag/click in both modes
+  if (hitIdx >= 0 || giIdx >= 0) {
+    const faceIdx = hitIdx >= 0 ? hitIdx : giIdx;
+    dragFaceIdx = faceIdx;
+    dragStart   = { mx, my, dxPx: modalPhoto.dets[faceIdx].dxPx ?? 0, dyPx: modalPhoto.dets[faceIdx].dyPx ?? 0 };
+    isDragging  = false;
+    return;
+  }
+
+  // Empty area in draw mode → start drawing rect
+  if (drawMode) {
     drawStart = {mx, my};
     drawing   = {x: mx, y: my, w: 0, h: 0};
   }
@@ -760,26 +891,52 @@ mcv.addEventListener('mousemove', e => {
   if (!modalPhoto) return;
   const {mx, my} = getXY(e);
 
-  if (drawMode) {
-    if (drawStart) {
-      drawing = {
-        x: Math.min(mx, drawStart.mx), y: Math.min(my, drawStart.my),
-        w: Math.abs(mx - drawStart.mx), h: Math.abs(my - drawStart.my)
-      };
-      drawModal();
+  // Active sticker drag — process first in both modes
+  if (dragFaceIdx >= 0 && dragStart) {
+    const dx = mx - dragStart.mx, dy = my - dragStart.my;
+    if (!isDragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) isDragging = true;
+    if (isDragging) {
+      const face = modalPhoto.dets[dragFaceIdx];
+      if (iconImg && face.sel) {
+        face.dxPx = dragStart.dxPx + dx;
+        face.dyPx = dragStart.dyPx + dy;
+        mcv.style.cursor = 'grabbing';
+        drawModal();
+      }
+      return;
     }
-    mcv.style.cursor = (drawStart || hitFace(mx, my) < 0) ? 'crosshair' : 'pointer';
-  } else {
-    const idx = hitFace(mx, my);
-    mcv.style.cursor = idx >= 0 ? 'pointer' : 'default';
-    if (idx !== hovered) { hovered = idx; drawModal(); }
   }
+
+  // Draw mode rect drag
+  if (drawMode && drawStart) {
+    drawing = {
+      x: Math.min(mx, drawStart.mx), y: Math.min(my, drawStart.my),
+      w: Math.abs(mx - drawStart.mx), h: Math.abs(my - drawStart.my)
+    };
+    drawModal();
+    return;
+  }
+
+  // Hover / cursor update
+  const idx = hitFace(mx, my);
+  const gi  = hitGearBtn(mx, my);
+  if (gi >= 0) {
+    mcv.style.cursor = 'pointer';
+  } else if (idx >= 0 && modalPhoto.dets[idx].sel && iconImg) {
+    mcv.style.cursor = 'grab';
+  } else if (idx >= 0) {
+    mcv.style.cursor = 'pointer';
+  } else {
+    mcv.style.cursor = drawMode ? 'crosshair' : 'default';
+  }
+  if (idx !== hovered) { hovered = idx; drawModal(); }
 });
 
 mcv.addEventListener('mouseup', e => {
   if (!modalPhoto) return;
   const {mx, my} = getXY(e);
 
+  // Draw mode: finalize rect
   if (drawMode && drawStart) {
     if (drawing && drawing.w > 25 && drawing.h > 25) {
       modalPhoto.dets.push({
@@ -794,17 +951,48 @@ mcv.addEventListener('mouseup', e => {
     return;
   }
 
-  // Select mode: click to toggle
-  if (!drawMode) {
-    const idx = hitFace(mx, my);
-    if (idx >= 0) {
-      modalPhoto.dets[idx].sel = !modalPhoto.dets[idx].sel;
-      drawModal(); updateModalInfo();
+  // Drag ended on a selected face
+  if (dragFaceIdx >= 0) {
+    if (!isDragging) {
+      // Short movement = click: check gear first, then toggle
+      const gi = hitGearBtn(mx, my);
+      if (gi >= 0) {
+        adjustFaceIdx = (adjustFaceIdx === gi) ? -1 : gi;
+        updatePerFacePanel();
+      } else {
+        modalPhoto.dets[dragFaceIdx].sel = !modalPhoto.dets[dragFaceIdx].sel;
+        if (!modalPhoto.dets[dragFaceIdx].sel && adjustFaceIdx === dragFaceIdx) {
+          adjustFaceIdx = -1; updatePerFacePanel();
+        }
+        updateModalInfo();
+      }
     }
+    dragFaceIdx = -1; dragStart = null; isDragging = false;
+    mcv.style.cursor = drawMode ? 'crosshair' : 'default';
+    drawModal();
+    return;
+  }
+
+  // Click on empty area (no face hit) in either mode
+  const gi  = hitGearBtn(mx, my);
+  if (gi >= 0) {
+    adjustFaceIdx = (adjustFaceIdx === gi) ? -1 : gi;
+    updatePerFacePanel();
+    drawModal();
+    return;
+  }
+  if (!drawMode && adjustFaceIdx >= 0) {
+    // Clicked empty area while per-face panel open → auto-dismiss
+    adjustFaceIdx = -1;
+    updatePerFacePanel();
+    drawModal();
   }
 });
 
 mcv.addEventListener('mouseleave', () => {
+  if (dragFaceIdx >= 0 && isDragging) {
+    dragFaceIdx = -1; dragStart = null; isDragging = false;
+  }
   if (hovered !== -1) { hovered = -1; drawModal(); }
 });
 
@@ -820,14 +1008,70 @@ mcv.addEventListener('contextmenu', e => {
   drawModal(); updateModalInfo();
 });
 
+/* ─── Per-face panel helpers ─────────────────────────────────── */
+function updatePerFacePanel() {
+  const panel = document.getElementById('mperface');
+  if (adjustFaceIdx < 0 || !modalPhoto) { panel.style.display = 'none'; return; }
+  const d  = modalPhoto.dets[adjustFaceIdx];
+  panel.style.display = 'block';
+  document.getElementById('mpfidx').textContent = adjustFaceIdx + 1;
+  const sv = d.scaleOv  ?? modalPhoto.stickerScale  ?? 120;
+  const ov = d.offsetOv ?? modalPhoto.stickerOffset ?? 10;
+  document.getElementById('mpfsr').value = sv;
+  document.getElementById('mpfsv').textContent = sv + '%';
+  document.getElementById('mpfor').value = ov;
+  document.getElementById('mpfov').textContent = ov + '%';
+}
+
+function resetPerFace() {
+  if (adjustFaceIdx < 0 || !modalPhoto) return;
+  delete modalPhoto.dets[adjustFaceIdx].scaleOv;
+  delete modalPhoto.dets[adjustFaceIdx].offsetOv;
+  updatePerFacePanel();
+  drawModal();
+}
+
+function resetFacePos() {
+  if (adjustFaceIdx < 0 || !modalPhoto) return;
+  delete modalPhoto.dets[adjustFaceIdx].dxPx;
+  delete modalPhoto.dets[adjustFaceIdx].dyPx;
+  drawModal();
+}
+
 /* ─── Modal slider live update ───────────────────────────────── */
 document.getElementById('msr').addEventListener('input', function() {
-  document.getElementById('msv').textContent = this.value + '%';
+  const newVal = parseFloat(this.value);
+  const delta  = newVal - prevGlobalScale;
+  prevGlobalScale = newVal;
+  document.getElementById('msv').textContent = newVal + '%';
+  // Apply delta to per-face scale overrides so they move with global
+  if (modalPhoto && delta !== 0) {
+    modalPhoto.dets.forEach(d => {
+      if (d.scaleOv != null) d.scaleOv = Math.max(40, Math.min(220, d.scaleOv + delta));
+    });
+    if (adjustFaceIdx >= 0) updatePerFacePanel();
+  }
   drawModal();
 });
 document.getElementById('mor').addEventListener('input', function() {
   document.getElementById('mov').textContent = this.value + '%';
   drawModal();
+});
+// Per-face size slider
+document.getElementById('mpfsr').addEventListener('input', function() {
+  document.getElementById('mpfsv').textContent = this.value + '%';
+  if (adjustFaceIdx >= 0 && modalPhoto) {
+    modalPhoto.dets[adjustFaceIdx].scaleOv = parseFloat(this.value);
+    drawModal();
+  }
+});
+// Per-face offset slider
+document.getElementById('mpfor').addEventListener('input', function() {
+  document.getElementById('mpfov').textContent = this.value + '%';
+  if (adjustFaceIdx >= 0 && modalPhoto) {
+    modalPhoto.dets[adjustFaceIdx].offsetOv = parseFloat(this.value);
+    drawModal();
+  }
 });
 
 /* ─── Confirm selection (modal → back to card) ───────────────── */
@@ -835,6 +1079,7 @@ mapplyBtn.onclick = () => {
   if (!modalPhoto) return;
   modalPhoto.stickerScale  = parseFloat(document.getElementById('msr').value);
   modalPhoto.stickerOffset = parseFloat(document.getElementById('mor').value);
+  adjustFaceIdx = -1;
   modalPhoto.status = 'confirmed';
   // Render preview immediately so card shows result right away
   if (iconImg) modalPhoto.previewCanvas = renderStickerCanvas(modalPhoto);
@@ -846,17 +1091,21 @@ mapplyBtn.onclick = () => {
 
 /* ─── Render sticker to canvas (shared helper) ───────────────── */
 function renderStickerCanvas(p) {
-  const scale  = (p.stickerScale  ?? 120) / 100;
-  const offPct = (p.stickerOffset ?? 10)  / 100;
+  const globalScale  = (p.stickerScale  ?? 120) / 100;
+  const globalOffPct = (p.stickerOffset ?? 10)  / 100;
   const cv  = document.createElement('canvas');
   cv.width  = p.img.naturalWidth;
   cv.height = p.img.naturalHeight;
   const ctx = cv.getContext('2d');
   ctx.drawImage(p.img, 0, 0);
   p.dets.filter(d => d.sel).forEach(d => {
+    const scale  = d.scaleOv  != null ? d.scaleOv  / 100 : globalScale;
+    const offPct = d.offsetOv != null ? d.offsetOv / 100 : globalOffPct;
     const iw = d.w * scale;
     const ih = iw * (iconImg.height / iconImg.width);
-    ctx.drawImage(iconImg, d.x + (d.w - iw)/2, d.y + (d.h - ih)/2 - d.h*offPct, iw, ih);
+    const ix = d.x + (d.w - iw)/2 + (d.dxPx ?? 0);
+    const iy = d.y + (d.h - ih)/2 - d.h * offPct + (d.dyPx ?? 0);
+    ctx.drawImage(iconImg, ix, iy, iw, ih);
   });
   return cv;
 }

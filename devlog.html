@@ -56,6 +56,10 @@
   .s5{--c:#10b981} .s5 .dot{background:#10b981}
   .s6{--c:#ef4444} .s6 .dot{background:#ef4444}
   .s7{--c:#06b6d4} .s7 .dot{background:#06b6d4}
+  .s8{--c:#7c3aed} .s8 .dot{background:#7c3aed}
+  .s9{--c:#dc2626} .s9 .dot{background:#dc2626}
+  .s10{--c:#059669} .s10 .dot{background:#059669}
+  .s11{--c:#d97706} .s11 .dot{background:#d97706}
 
   .arrow{font-size:20px;position:absolute;left:50%;transform:translateX(-50%);
     bottom:-20px;color:#a78bfa;z-index:3}
@@ -177,6 +181,76 @@
         <li><b>语法错误</b>：绘制矩形代码误插到顶层作用域（多余 <code>}</code>），导致整个 script 块解析失败、所有函数未执行</li>
         <li><b>模型加载挂起</b>：CDN 请求 stall（不报错也不完成）→ 加 <b>20s 超时</b> + <code>Promise.race</code></li>
         <li>超时后显示 <b>「🔄 重试」</b>按钮，一键重新加载</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <!-- 8 -->
+  <div class="step s8">
+    <div class="dot">8</div>
+    <div class="card">
+      <div class="card-title">🎯 单独人脸调整模式</div>
+      <div class="card-sub"><span class="tag tag-feat">新功能</span>统一调整无法满足每张脸的差异</div>
+      <ul>
+        <li>每张脸头顶显示 <b>⚙ 小图标</b>，点击弹出单独调整面板</li>
+        <li>面板含 <b>单独大小</b> + <b>单独偏移</b> 两个滑块（独立 override）</li>
+        <li>选中脸可直接 <b>拖动</b> 改变贴纸水平/垂直位置（dxPx / dyPx）</li>
+        <li>全局滑块仍有效，<b>delta 同步</b>到所有已设 scaleOv 的脸</li>
+        <li>单独调整面板「重置」按钮一键恢复全局值</li>
+        <li>点击画布空白处自动收起面板</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 9 -->
+  <div class="step s9">
+    <div class="dot">9</div>
+    <div class="card">
+      <div class="card-title">🚫 放大/拖拽功能（尝试后移除）</div>
+      <div class="card-sub"><span class="tag tag-bug">Bug</span>引入后点击照片图片不显示，体验变差</div>
+      <ul>
+        <li>尝试在弹窗内加滚轮缩放 + 鼠标拖拽平移</li>
+        <li><code>#mbody-inner { position:absolute; inset:0 }</code> 导致 canvas 尺寸链断裂</li>
+        <li>大图打开后 canvas 宽高计算为 0，画布空白</li>
+        <li><b>完全删除</b> zoom/pan 相关代码（modalZoom、panStart、applyZoom、wheel 监听）</li>
+        <li>恢复简单 flex 布局：<code>max-height: calc(92vh - 240px)</code></li>
+        <li>验证：Grep 确认所有 zoom 关键词已清零</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 10 -->
+  <div class="step s10">
+    <div class="dot">10</div>
+    <div class="card">
+      <div class="card-title">✏️ 手动标注编辑 Bug 修复</div>
+      <div class="card-sub"><span class="tag tag-fix">修复</span>手动画框后无法拖动、点选、调整</div>
+      <ul>
+        <li><b>根因 1</b>：mousedown 只在 <code>iconImg &amp;&amp; sel</code> 时才设 dragFaceIdx，手动框被忽略</li>
+        <li><b>根因 2</b>：mousemove 的 <code>if (drawMode) return</code> 在拖拽处理之前短路</li>
+        <li>修复：mousedown 只要 hitIdx ≥ 0（或 hitGear ≥ 0）就设 dragFaceIdx，两种模式通用</li>
+        <li>修复：mousemove 把 <b>拖拽更新提前</b>到 drawMode 分支之前执行</li>
+        <li>拖拽仅在 <code>iconImg &amp;&amp; face.sel</code> 时更新位置，其余只记录 isDragging</li>
+        <li>mouseup 的 dragFaceIdx 分支在 draw/select 两种模式下均可触发点击 / 切换 sel / 开关面板</li>
+        <li>光标离开 draw 模式后正确恢复 crosshair</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 11 -->
+  <div class="step s11">
+    <div class="dot">11</div>
+    <div class="card">
+      <div class="card-title">🔧 单独偏移不生效 Bug 修复</div>
+      <div class="card-sub"><span class="tag tag-fix">修复</span>拖动单独偏移滑块，贴纸纹丝不动</div>
+      <ul>
+        <li><b>根因 1</b>：<code>mpfor</code>（单独偏移滑块）<b>缺少 input 事件监听器</b>，拖动无任何反应</li>
+        <li><b>根因 2</b>：<code>renderStickerCanvas</code>（最终导出渲染）只用全局 offsetPct，<b>忽略了 <code>d.offsetOv</code></b></li>
+        <li><b>根因 3</b>：<code>resetPerFace</code> 只清除 scaleOv，<b>未清除 offsetOv</b>，重置后偏移残留</li>
+        <li>修复：补充 mpfor 的 input 监听，实时写入 <code>d.offsetOv</code> 并调用 drawModal()</li>
+        <li>修复：renderStickerCanvas 改为 <code>d.offsetOv != null ? d.offsetOv/100 : globalOffPct</code></li>
+        <li>修复：resetPerFace 同时 delete scaleOv 和 offsetOv</li>
       </ul>
     </div>
   </div>
