@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>贴纸换脸</title>
-  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
@@ -133,8 +132,13 @@
       border-radius:50%; background:rgba(0,0,0,.55); color:#fff;
       border:none; cursor:pointer; font-size:15px; line-height:1;
       display:none; align-items:center; justify-content:center; z-index:2;
+      transition:background .15s;
     }
-    .card:hover .del-btn { display:flex; }
+    .card:hover .del-btn, .del-btn.arm { display:flex; }
+    .del-btn.arm {
+      width:auto; padding:0 12px; border-radius:13px;
+      background:#dc2626; font-size:12px; font-weight:700;
+    }
 
     /* ── Modal ── */
     #modal {
@@ -165,8 +169,23 @@
     }
     #mclose:hover { background:#e5e7eb; color:#374151; }
 
-    #mbody { flex:1; overflow:auto; padding:0; display:flex; align-items:center; justify-content:center; background:#1a1a2e; min-height:0; }
+    #mbody { flex:1; overflow:auto; padding:0; display:flex; align-items:center; justify-content:center; background:#1a1a2e; min-height:0; position:relative; }
     #mbody canvas { display:block; max-width:100%; max-height:calc(92vh - 240px); cursor:pointer; user-select:none; }
+
+    /* ── Undo toast ── */
+    #mundo {
+      position:absolute; bottom:14px; left:50%; transform:translateX(-50%) translateY(8px);
+      background:rgba(17,24,39,.92); color:#fff; border-radius:24px;
+      padding:8px 10px 8px 16px; font-size:13px; display:flex; align-items:center; gap:10px;
+      opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:5;
+      box-shadow:0 4px 16px rgba(0,0,0,.35); white-space:nowrap;
+    }
+    #mundo.show { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
+    #mundo button {
+      border:none; border-radius:16px; padding:4px 14px; cursor:pointer;
+      background:#7c3aed; color:#fff; font-size:12px; font-weight:700;
+    }
+    #mundo button:hover { background:#8b5cf6; }
 
     /* ── Modal controls (sliders) ── */
     #mcontrols {
@@ -199,6 +218,35 @@
     }
     #mdrawbtn:hover { border-color:#7c3aed; color:#7c3aed; }
     #mdrawbtn.active { background:#7c3aed; border-color:#7c3aed; color:#fff; }
+
+    /* ── Per-face controls (purple theme; red reserved for delete) ── */
+    #mperface {
+      padding:12px 22px 14px; background:linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%);
+      border-top:2px solid #ddd6fe; display:none; flex-shrink:0;
+    }
+    .mperface-head {
+      font-size:13px; font-weight:700; color:#7c3aed;
+      display:flex; align-items:center; gap:8px; margin-bottom:10px;
+    }
+    .mperface-head .pf-title {
+      flex:1; display:flex; align-items:center; gap:6px;
+    }
+    .pf-badge {
+      background:#7c3aed; color:#fff; font-size:11px; font-weight:800;
+      padding:2px 8px; border-radius:20px; letter-spacing:.3px;
+    }
+    .mperface-head button {
+      padding:4px 12px; border-radius:7px; border:1.5px solid #c4b5fd;
+      background:#fff; color:#7c3aed; font-size:11px; font-weight:700;
+      cursor:pointer; white-space:nowrap; transition:all .15s;
+      display:flex; align-items:center; gap:4px;
+    }
+    .mperface-head button:hover { background:#ede9fe; border-color:#a78bfa; }
+    .mperface-head button.pf-del { border-color:#fca5a5; color:#dc2626; }
+    .mperface-head button.pf-del:hover { background:#fee2e2; border-color:#f87171; }
+    #mperface .mcsl label { color:#5b21b6; }
+    #mperface .mcsl label em { color:#7c3aed; }
+    #mperface .mcsl input { accent-color:#7c3aed; }
   </style>
 </head>
 <body>
@@ -229,7 +277,7 @@
     <div class="panel">
       <div class="ptitle">📋 使用步骤</div>
       <ol class="steps">
-        <li>上传贴纸图标（右上方）</li>
+        <li>上传贴纸图标</li>
         <li>拖入或点击选择照片</li>
         <li>等待自动人脸检测</li>
         <li><b>点击卡片</b>打开弹窗，点击脸选/取消</li>
@@ -237,7 +285,8 @@
         <li>点「确认选择」返回，再点「应用贴纸」</li>
       </ol>
       <div class="tip-box">
-        💡 检测不到脸？请确保人脸正面清晰、光线充足。侧脸、遮挡较多时可能漏检。
+        💡 检测不到脸？请确保人脸正面清晰、光线充足，漏检可用「✏️ 手动标注」补框。<br>
+        🗑 误检 / 多余的框：鼠标移到框上点 <b>✕</b> 删除，删错了按 <b>Ctrl+Z</b> 撤销。
       </div>
     </div>
   </div>
@@ -271,11 +320,12 @@
     <div id="mhead">
       <h2 id="mtitle">选择要贴贴纸的人脸</h2>
       <span id="mselinfo"></span>
-      <button id="mdrawbtn" onclick="toggleDrawMode()" title="拖拽绘制人脸框；右键删除">✏️ 手动标注</button>
+      <button id="mdrawbtn" onclick="toggleDrawMode()" title="在空白处拖拽绘制人脸框">✏️ 手动标注</button>
       <button id="mclose" onclick="closeModal()">✕</button>
     </div>
     <div id="mbody">
       <canvas id="mcv"></canvas>
+      <div id="mundo"><span id="mundo-txt">已删除人脸框</span><button onclick="undoDelete()">↩ 撤销</button></div>
     </div>
     <div id="mcontrols">
       <div class="mcsl">
@@ -288,8 +338,29 @@
       </div>
       <div id="mno-icon-hint" style="display:none">⚠️ 请先在左侧上传贴纸图标，才能预览效果</div>
     </div>
+    <div id="mperface">
+      <div class="mperface-head">
+        <div class="pf-title">
+          <span class="pf-badge">单独调整</span>
+          第 <b id="mpfidx">?</b> 张脸 &nbsp;·&nbsp; 拖动贴纸可移动位置
+        </div>
+        <button onclick="resetFacePos()">↺ 重置位置</button>
+        <button onclick="resetPerFace()">↺ 重置大小</button>
+        <button class="pf-del" onclick="deleteFace(adjustFaceIdx)">🗑 删除此框</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+        <div class="mcsl">
+          <label>大小（单独）<em id="mpfsv">120%</em></label>
+          <input type="range" id="mpfsr" min="40" max="220" value="120" step="5"/>
+        </div>
+        <div class="mcsl">
+          <label>偏移（单独）<em id="mpfov">10%</em></label>
+          <input type="range" id="mpfor" min="-40" max="60" value="10" step="5"/>
+        </div>
+      </div>
+    </div>
     <div id="mfooter">
-      <div id="mhint">选择模式：点击切换贴/跳过 &nbsp;·&nbsp; 标注模式：拖拽添加框，右键删除</div>
+      <div id="mhint">点击脸：贴/跳过 &nbsp;·&nbsp; 拖动贴纸：移位 &nbsp;·&nbsp; ⚙ 单独调整 &nbsp;·&nbsp; ✕ 或右键：删除框 &nbsp;·&nbsp; Ctrl+Z：撤销删除</div>
       <div class="mfoot-r">
         <button class="btn btn-wh" onclick="closeModal()">取消</button>
         <button class="btn btn-pu" id="mapply">✓ 确认选择</button>
@@ -300,39 +371,108 @@
 
 <script>
 /* ─── State ─────────────────────────────────────────────────── */
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 let modelReady = false;
 let iconImg    = null;
 let photos     = [];
 let uid        = 0;
-let modalPhoto = null;   // currently open photo
-let hovered    = -1;     // hovered face index in modal
-let drawMode   = false;  // manual annotation mode
-let drawStart  = null;   // {mx,my} where drag started
-let drawing    = null;   // {x,y,w,h} rect being drawn
+let modalPhoto    = null;  // currently open photo
+let hovered       = -1;   // hovered face index in modal
+let drawMode      = false; // manual annotation mode
+let drawStart     = null;  // {mx,my} where draw-rect drag started
+let drawing       = null;  // {x,y,w,h} rect being drawn
+let adjustFaceIdx = -1;    // index of face being individually size-adjusted (-1 = none)
+let dragFaceIdx   = -1;    // face being position-dragged (-1 = none)
+let dragStart     = null;  // {mx,my,dxPx,dyPx} drag origin
+let isDragging    = false; // mouse moved far enough to be a drag (not a click)
+let prevGlobalScale = 120; // tracks global scale for delta propagation to per-face overrides
+let delArm     = -1;   // face whose ✕ chip was pressed (confirm on mouseup)
+let hoverDel   = -1;   // face whose ✕ chip is hovered
+let undoStack  = [];   // deleted face boxes of the open photo, for undo
+let undoTimer  = null; // auto-hide timer of the undo toast
 
-/* ─── Model ─────────────────────────────────────────────────── */
-async function loadModel() {
-  setStatus('正在加载人脸检测模型，请稍候…');
-  try {
-    const timeout = new Promise((_, rej) =>
-      setTimeout(() => rej(new Error('网络超时')), 20000));
-    await Promise.race([
-      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-      timeout
-    ]);
-    modelReady = true;
-    setStatus('人脸检测模型已就绪 ✓', 'ok');
-    refreshBtns();
-  } catch(e) {
-    setStatus(
-      `模型加载失败（${e.message}）&nbsp;`
-      + `<button onclick="loadModel()" style="padding:2px 10px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:12px;font-weight:600">🔄 重试</button>`,
-      'err'
-    );
-  }
+/* ─── Model (multi-CDN fallback) ────────────────────────────── */
+// 同一份 npm 包在多个镜像上都有；公司网络常屏蔽其中某一个，逐条线路试
+const CDN_BASES = [
+  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api',
+  'https://fastly.jsdelivr.net/npm/@vladmandic/face-api',
+  'https://unpkg.com/@vladmandic/face-api',
+  'https://gcore.jsdelivr.net/npm/@vladmandic/face-api',
+];
+let booting    = false;
+let scriptBase = null;  // CDN that served face-api.js; try its model first
+
+function retryBtnHtml() {
+  return `<button onclick="bootModel()" style="padding:2px 10px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;cursor:pointer;font-size:12px;font-weight:600">🔄 重试</button>`;
 }
-loadModel();
+
+function loadScript(url, ms) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    const t = setTimeout(() => { s.remove(); rej(new Error('超时')); }, ms);
+    s.onload  = () => { clearTimeout(t); res(); };
+    s.onerror = () => { clearTimeout(t); s.remove(); rej(new Error('连接失败')); };
+    s.src = url;
+    document.head.appendChild(s);
+  });
+}
+
+function onModelReady() {
+  if (modelReady) return;
+  modelReady = true;
+  setStatus('人脸检测模型已就绪 ✓', 'ok');
+  refreshBtns();
+  processQueue();
+}
+
+// 某条线路超时后下载仍在后台继续；定时探测，一旦完成立即转为就绪
+// （修复：状态栏显示"加载失败"但实际能用的问题）
+function startLateWatch() {
+  const timer = setInterval(() => {
+    if (modelReady) { clearInterval(timer); return; }
+    if (window.faceapi?.nets?.ssdMobilenetv1?.isLoaded) { clearInterval(timer); onModelReady(); }
+  }, 2000);
+}
+
+async function bootModel() {
+  if (booting || modelReady) return;
+  booting = true;
+  try {
+    // 第一步：加载 face-api.js 库本体
+    if (typeof faceapi === 'undefined') {
+      let ok = false;
+      for (let i = 0; i < CDN_BASES.length; i++) {
+        setStatus(`正在加载人脸检测组件（线路 ${i + 1}/${CDN_BASES.length}）…`);
+        try {
+          await loadScript(CDN_BASES[i] + '/dist/face-api.js', 12000);
+          scriptBase = CDN_BASES[i]; ok = true; break;
+        } catch (_) {}
+      }
+      if (!ok) {
+        setStatus('组件加载失败：所有线路均无法连接，请检查网络后 ' + retryBtnHtml(), 'err');
+        return;
+      }
+    }
+    // 第二步：加载模型权重（优先用刚才成功的那条线路）
+    const bases = scriptBase
+      ? [scriptBase, ...CDN_BASES.filter(b => b !== scriptBase)]
+      : [...CDN_BASES];
+    startLateWatch();
+    for (let i = 0; i < bases.length; i++) {
+      if (faceapi.nets.ssdMobilenetv1.isLoaded) { onModelReady(); return; }
+      setStatus(`正在加载人脸检测模型（线路 ${i + 1}/${bases.length}）…`);
+      try {
+        await Promise.race([
+          faceapi.nets.ssdMobilenetv1.loadFromUri(bases[i] + '/model'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('超时')), 30000))
+        ]);
+        onModelReady(); return;
+      } catch (_) {}
+    }
+    if (faceapi.nets.ssdMobilenetv1.isLoaded) { onModelReady(); return; }
+    setStatus('模型加载失败：已尝试全部线路。若网络较慢，后台仍在下载，完成后会自动就绪 ' + retryBtnHtml(), 'err');
+  } finally { booting = false; }
+}
+bootModel();
 
 function setStatus(msg, cls='') {
   const b = document.getElementById('sb');
@@ -371,10 +511,16 @@ function addFiles(files) {
   });
   renderGallery();
   refreshBtns();
+  processQueue();
+}
+
+// 模型就绪前上传的照片先排队，就绪后统一检测（此前会直接报"未检测到人脸"）
+function processQueue() {
+  if (!modelReady) return;
   photos.filter(p => p.status === 'wait').forEach(p => detect(p));
 }
 
-/* ─── Detection helpers: NMS + flip ────────────────────────────── */
+/* ─── Detection helpers: dedupe + flip ─────────────────────────── */
 function iou(a, b) {
   const ix = Math.max(a.x, b.x), iy = Math.max(a.y, b.y);
   const iw = Math.min(a.x+a.w, b.x+b.w) - ix;
@@ -384,14 +530,27 @@ function iou(a, b) {
   return inter / (a.w*a.h + b.w*b.h - inter);
 }
 
-function nms(boxes, thresh = 0.35) {
-  const sorted = [...boxes].sort((a, b) => b.w*b.h - a.w*a.h);
-  const keep = [], used = new Set();
-  for (let i = 0; i < sorted.length; i++) {
-    if (used.has(i)) continue;
-    keep.push(sorted[i]);
-    for (let j = i+1; j < sorted.length; j++)
-      if (iou(sorted[i], sorted[j]) > thresh) used.add(j);
+// 交叠面积 / 较小框面积：大小差异较大的同脸双框 IoU 不高，用这个才能抓住
+function overlapRatio(a, b) {
+  const ix = Math.max(a.x, b.x), iy = Math.max(a.y, b.y);
+  const iw = Math.min(a.x+a.w, b.x+b.w) - ix;
+  const ih = Math.min(a.y+a.h, b.y+b.h) - iy;
+  if (iw <= 0 || ih <= 0) return 0;
+  return (iw * ih) / Math.min(a.w*a.h, b.w*b.h);
+}
+
+function dedupe(boxes, imgW, imgH) {
+  const cleaned = boxes
+    .map(b => {
+      const x = Math.max(0, b.x), y = Math.max(0, b.y);
+      return { ...b, x, y, w: Math.min(b.x + b.w, imgW) - x, h: Math.min(b.y + b.h, imgH) - y };
+    })
+    .filter(b => b.w >= 12 && b.h >= 12)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));  // 置信度高的优先保留
+  const keep = [];
+  for (const b of cleaned) {
+    if (keep.some(k => iou(k, b) > 0.35 || overlapRatio(k, b) > 0.55)) continue;
+    keep.push(b);
   }
   return keep;
 }
@@ -406,14 +565,15 @@ async function detect(p) {
     img.onload = async () => {
       p.img = img;
       try {
-        // Lower threshold catches more distant/partial faces
-        const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 });
+        // 0.2 误检太多（一张脸两个框的元凶之一）；0.35 兼顾远处人脸与准确率
+        const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.35 });
 
         // Pass 1: original image
         const dets1 = await faceapi.detectAllFaces(img, opts);
         const boxes1 = dets1.map(d => ({
           x: Math.round(d.box.x), y: Math.round(d.box.y),
-          w: Math.round(d.box.width), h: Math.round(d.box.height)
+          w: Math.round(d.box.width), h: Math.round(d.box.height),
+          score: d.score
         }));
 
         // Pass 2: horizontally flipped (catches side-facing profiles)
@@ -426,11 +586,13 @@ async function detect(p) {
         const boxes2 = dets2.map(d => ({
           x: Math.round(img.naturalWidth - d.box.x - d.box.width),
           y: Math.round(d.box.y),
-          w: Math.round(d.box.width), h: Math.round(d.box.height)
+          w: Math.round(d.box.width), h: Math.round(d.box.height),
+          score: d.score
         }));
 
-        // Merge + NMS to remove duplicates
-        p.dets = nms([...boxes1, ...boxes2]).map(b => ({ ...b, sel: true }));
+        // Merge + dedupe (IoU 与包含率双阈值，杜绝同脸双框)
+        p.dets = dedupe([...boxes1, ...boxes2], img.naturalWidth, img.naturalHeight)
+          .map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h, sel: true }));
       } catch(_) { p.dets = []; }
       p.status = p.dets.length ? 'sel' : 'none';
       renderCard(p);
@@ -496,10 +658,21 @@ function buildCard(p) {
   ov.appendChild(badge);
   imgWrap.appendChild(ov);
 
-  // Delete btn
+  // Delete btn (两次点击确认，防误删照片)
   const del = document.createElement('button');
-  del.className = 'del-btn'; del.textContent = '×';
-  del.onclick = e => { e.stopPropagation(); photos = photos.filter(q => q.id !== p.id); renderGallery(); refreshBtns(); };
+  del.className = 'del-btn'; del.textContent = '×'; del.title = '移除这张照片';
+  del.onclick = e => {
+    e.stopPropagation();
+    if (!del.classList.contains('arm')) {
+      del.classList.add('arm');
+      del.textContent = '再点一次确认移除';
+      del._t = setTimeout(() => { del.classList.remove('arm'); del.textContent = '×'; }, 2500);
+      return;
+    }
+    clearTimeout(del._t);
+    photos = photos.filter(q => q.id !== p.id);
+    renderGallery(); refreshBtns();
+  };
   imgWrap.appendChild(del);
 
   card.appendChild(imgWrap);
@@ -561,8 +734,16 @@ const mselinfo = document.getElementById('mselinfo');
 const mapplyBtn = document.getElementById('mapply');
 
 function openModal(p) {
-  modalPhoto = p;
-  hovered    = -1;
+  modalPhoto    = p;
+  hovered       = -1;
+  adjustFaceIdx = -1;
+  dragFaceIdx   = -1;
+  dragStart     = null;
+  isDragging    = false;
+  delArm        = -1;
+  hoverDel      = -1;
+  undoStack     = [];
+  hideUndoToast();
   modal.classList.add('open');
   document.getElementById('mtitle').textContent =
     (p.status === 'done' || p.status === 'confirmed') ? '重新调整贴纸' : '预览 & 选择人脸';
@@ -574,12 +755,14 @@ function openModal(p) {
   document.getElementById('mor').value = offset;
   document.getElementById('msv').textContent = scale + '%';
   document.getElementById('mov').textContent = offset + '%';
+  prevGlobalScale = scale;
 
   // Show/hide no-icon hint
   document.getElementById('mno-icon-hint').style.display = iconImg ? 'none' : 'block';
 
   mcv.width  = p.img.naturalWidth;
   mcv.height = p.img.naturalHeight;
+  updatePerFacePanel();
   drawModal();
   updateModalInfo();
   mapplyBtn.disabled = false;
@@ -587,8 +770,16 @@ function openModal(p) {
 
 function closeModal() {
   modal.classList.remove('open');
-  modalPhoto = null;
-  hovered    = -1;
+  modalPhoto    = null;
+  hovered       = -1;
+  adjustFaceIdx = -1;
+  dragFaceIdx   = -1;
+  dragStart     = null;
+  isDragging    = false;
+  delArm        = -1;
+  hoverDel      = -1;
+  undoStack     = [];
+  hideUndoToast();
   if (drawMode) {
     drawMode = false; drawStart = null; drawing = null;
     const btn = document.getElementById('mdrawbtn');
@@ -615,38 +806,55 @@ function getModalOffset() { return parseFloat(document.getElementById('mor').val
 function drawModal() {
   if (!modalPhoto) return;
   const ctx    = mcv.getContext('2d');
-  const scale  = getModalScale();
-  const offPct = getModalOffset();
   ctx.clearRect(0, 0, mcv.width, mcv.height);
   ctx.drawImage(modalPhoto.img, 0, 0);
 
+  const globalScale  = getModalScale();
+  const globalOffPct = getModalOffset();
+
   modalPhoto.dets.forEach((d, i) => {
-    const isHov = i === hovered;
-    const lw = Math.max(3, Math.round(Math.min(d.w, d.h) * 0.04));
+    const isHov    = i === hovered;
+    const isAdjust = i === adjustFaceIdx;
+    const lw = Math.max(2, Math.min(5, Math.round(Math.min(d.w, d.h) * 0.025)));
+
+    // Per-face overrides or fall back to global
+    const scale  = (d.scaleOv  != null ? d.scaleOv  : globalScale  * 100) / 100;
+    const offPct = (d.offsetOv != null ? d.offsetOv : globalOffPct * 100) / 100;
 
     if (d.sel) {
       if (iconImg) {
         // ── Preview mode: draw sticker on face ──
         const iw = d.w * scale;
         const ih = iw * (iconImg.height / iconImg.width);
-        const ix = d.x + (d.w - iw) / 2;
-        const iy = d.y + (d.h - ih) / 2 - d.h * offPct;
+        const dx = d.dxPx ?? 0, dy = d.dyPx ?? 0;
+        const ix = d.x + (d.w - iw) / 2 + dx;
+        const iy = d.y + (d.h - ih) / 2 - d.h * offPct + dy;
         ctx.drawImage(iconImg, ix, iy, iw, ih);
 
-        // Subtle green border to show it's selected
-        ctx.strokeStyle = isHov ? '#06d6a0' : 'rgba(16,185,129,0.75)';
-        ctx.lineWidth   = lw;
+        // Visual indicator box follows the sticker (shifted by dx/dy)
+        const bx = d.x + dx, by = d.y + dy;
+        const shifted = { x: bx, y: by, w: d.w, h: d.h };
+
+        // Border: purple if being adjusted, else green
+        ctx.strokeStyle = isAdjust ? '#7c3aed' : (isHov ? '#06d6a0' : 'rgba(16,185,129,0.75)');
+        ctx.lineWidth   = isAdjust ? lw + 2 : lw;
+        ctx.setLineDash(isAdjust ? [lw*2, lw] : []);
+        ctx.strokeRect(bx, by, d.w, d.h);
         ctx.setLineDash([]);
-        ctx.strokeRect(d.x, d.y, d.w, d.h);
 
         // Hover: dim overlay + "点击取消" hint
-        if (isHov) {
+        if (isHov && !isAdjust) {
           ctx.fillStyle = 'rgba(0,0,0,0.38)';
-          ctx.fillRect(d.x, d.y, d.w, d.h);
-          drawCenterHint(ctx, d, '点击取消');
+          ctx.fillRect(bx, by, d.w, d.h);
+          drawCenterHint(ctx, shifted, '点击取消');
         }
         // Small corner chip
-        drawCornerChip(ctx, d.x, d.y, '✓', '#10b981', d.h);
+        drawCornerChip(ctx, bx, by, '✓', isAdjust ? '#7c3aed' : '#10b981', d.h);
+        // Action chips: ⚙ adjust + ✕ delete (shown on hover or while adjusting)
+        if (isHov || isAdjust) {
+          drawGearChip(ctx, d, isAdjust);
+          drawDelChip(ctx, d, i === hoverDel);
+        }
       } else {
         // ── No icon: selection-only view ──
         ctx.fillStyle = isHov ? 'rgba(16,185,129,.28)' : 'rgba(16,185,129,.15)';
@@ -656,6 +864,7 @@ function drawModal() {
         ctx.setLineDash([]);
         ctx.strokeRect(d.x, d.y, d.w, d.h);
         drawBadge(ctx, d.x + d.w / 2, d.y, '✓', '#10b981', '#fff', d.h);
+        if (isHov) drawDelChip(ctx, d, i === hoverDel);
       }
     } else {
       // ── Deselected: dark dim + dashed border ──
@@ -667,7 +876,8 @@ function drawModal() {
       ctx.strokeRect(d.x, d.y, d.w, d.h);
       ctx.setLineDash([]);
       if (isHov) drawCenterHint(ctx, d, '点击添加');
-      drawBadge(ctx, d.x + d.w / 2, d.y, '✕', '#6b7280', '#fff', d.h);
+      drawBadge(ctx, d.x + d.w / 2, d.y, '−', '#6b7280', '#fff', d.h);
+      if (isHov) drawDelChip(ctx, d, i === hoverDel);
     }
   });
 
@@ -684,17 +894,17 @@ function drawModal() {
 }
 
 function drawBadge(ctx, cx, cy, sym, bg, fg, faceH) {
-  const r = Math.max(16, Math.min(28, faceH * 0.13));
+  const r = Math.max(12, Math.min(18, faceH * 0.09));
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = fg;
-  ctx.font = `bold ${Math.round(r * 1.15)}px sans-serif`;
+  ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(sym, cx, cy);
 }
 
 function drawCornerChip(ctx, x, y, sym, color, faceH) {
-  const r = Math.max(12, Math.min(20, faceH * 0.1));
+  const r = Math.max(9, Math.min(14, faceH * 0.07));
   const cx = x + r + 4, cy = y + r + 4;
   ctx.fillStyle = color;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
@@ -718,6 +928,92 @@ function drawCenterHint(ctx, d, text) {
   ctx.fillText(text, d.x + d.w / 2, d.y + d.h / 2);
 }
 
+function chipR(faceH) { return Math.max(11, Math.min(16, faceH * 0.07)); }
+
+// 框右上角两个操作钮：✕ 删除（最右），⚙ 单独调整（其左）
+// 命中位置与绘制位置共用同一套计算，避免"看得见点不着"
+function delChipCenter(d) {
+  const r  = chipR(d.h);
+  const sx = (d.sel && iconImg) ? (d.dxPx ?? 0) : 0;
+  const sy = (d.sel && iconImg) ? (d.dyPx ?? 0) : 0;
+  return { cx: d.x + d.w - r - 5 + sx, cy: d.y + r + 5 + sy, r };
+}
+
+function gearChipCenter(d) {
+  const r = chipR(d.h);
+  return { cx: d.x + d.w - 3*r - 14 + (d.dxPx ?? 0), cy: d.y + r + 5 + (d.dyPx ?? 0), r };
+}
+
+function drawGearChip(ctx, d, active) {
+  const c = gearChipCenter(d);
+  const r = c.r + (active ? 2 : 0);
+
+  if (active) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(124,58,237,0.65)';
+    ctx.shadowBlur  = 10;
+    ctx.fillStyle   = '#7c3aed';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth   = 2;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r + 2.5, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(124,58,237,0.8)';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.round(r * 1.2)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('⚙', c.cx, c.cy);
+}
+
+function drawDelChip(ctx, d, hot) {
+  const c = delChipCenter(d);
+  const r = c.r + (hot ? 2 : 0);
+  if (hot) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(220,38,38,0.6)';
+    ctx.shadowBlur  = 10;
+    ctx.fillStyle   = '#dc2626';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth   = 2;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r + 2.5, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(220,38,38,0.82)';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.round(r * 1.1)}px sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('✕', c.cx, c.cy);
+}
+
+function hitGearBtn(mx, my) {
+  if (!modalPhoto || !iconImg) return -1;
+  for (let i = 0; i < modalPhoto.dets.length; i++) {
+    const d = modalPhoto.dets[i];
+    if (!d.sel) continue;
+    if (i !== hovered && i !== adjustFaceIdx) continue; // 只在按钮可见时可点
+    const c = gearChipCenter(d);
+    if (Math.hypot(mx - c.cx, my - c.cy) <= c.r + 4) return i;
+  }
+  return -1;
+}
+
+function hitDeleteBtn(mx, my) {
+  if (!modalPhoto) return -1;
+  for (let i = 0; i < modalPhoto.dets.length; i++) {
+    const d = modalPhoto.dets[i];
+    if (i !== hovered && i !== adjustFaceIdx) continue; // 只在按钮可见时可点
+    const c = delChipCenter(d);
+    if (Math.hypot(mx - c.cx, my - c.cy) <= c.r + 4) return i;
+  }
+  return -1;
+}
+
 /* ─── Modal Interactions ─────────────────────────────────────── */
 function getXY(e) {
   const r = mcv.getBoundingClientRect();
@@ -729,12 +1025,21 @@ function getXY(e) {
 
 function hitFace(mx, my) {
   if (!modalPhoto) return -1;
+  let best = -1, bestArea = Infinity;
   for (let i = 0; i < modalPhoto.dets.length; i++) {
-    const {x,y,w,h} = modalPhoto.dets[i];
-    const pad = Math.max(6, w * 0.04);
-    if (mx >= x - pad && mx <= x + w + pad && my >= y - pad && my <= y + h + pad) return i;
+    const d = modalPhoto.dets[i];
+    // 命中区跟随已拖走的贴纸框（与绘制位置一致，修复拖动后点不中）
+    const sx = (d.sel && iconImg) ? (d.dxPx ?? 0) : 0;
+    const sy = (d.sel && iconImg) ? (d.dyPx ?? 0) : 0;
+    const x = d.x + sx, y = d.y + sy;
+    const pad = Math.max(6, d.w * 0.04);
+    if (mx >= x - pad && mx <= x + d.w + pad && my >= y - pad && my <= y + d.h + pad) {
+      // 多框重叠时优先命中小框，方便点到"套在里面"的重复框
+      const area = d.w * d.h;
+      if (area < bestArea) { best = i; bestArea = area; }
+    }
   }
-  return -1;
+  return best;
 }
 
 function toggleDrawMode() {
@@ -748,9 +1053,29 @@ function toggleDrawMode() {
 }
 
 mcv.addEventListener('mousedown', e => {
-  if (!modalPhoto || !drawMode) return;
+  if (!modalPhoto) return;
+  if (e.button !== 0) return;
+
   const {mx, my} = getXY(e);
-  if (hitFace(mx, my) < 0) {           // only start draw on empty area
+
+  // ✕ 删除钮按下：只做标记，mouseup 仍在钮上才删（防滑过误删），不进入拖拽
+  const di = hitDeleteBtn(mx, my);
+  if (di >= 0) { delArm = di; return; }
+
+  const hitIdx = hitFace(mx, my);
+  const giIdx  = hitGearBtn(mx, my);
+
+  // Click on any face or its gear chip: track for drag/click in both modes
+  if (hitIdx >= 0 || giIdx >= 0) {
+    const faceIdx = hitIdx >= 0 ? hitIdx : giIdx;
+    dragFaceIdx = faceIdx;
+    dragStart   = { mx, my, dxPx: modalPhoto.dets[faceIdx].dxPx ?? 0, dyPx: modalPhoto.dets[faceIdx].dyPx ?? 0 };
+    isDragging  = false;
+    return;
+  }
+
+  // Empty area in draw mode → start drawing rect
+  if (drawMode) {
     drawStart = {mx, my};
     drawing   = {x: mx, y: my, w: 0, h: 0};
   }
@@ -760,26 +1085,62 @@ mcv.addEventListener('mousemove', e => {
   if (!modalPhoto) return;
   const {mx, my} = getXY(e);
 
-  if (drawMode) {
-    if (drawStart) {
-      drawing = {
-        x: Math.min(mx, drawStart.mx), y: Math.min(my, drawStart.my),
-        w: Math.abs(mx - drawStart.mx), h: Math.abs(my - drawStart.my)
-      };
-      drawModal();
+  // Active sticker drag — process first in both modes
+  if (dragFaceIdx >= 0 && dragStart) {
+    const dx = mx - dragStart.mx, dy = my - dragStart.my;
+    // 阈值 4→6px：轻微手抖不再被当成拖拽，减少想点击却变成移动的误操作
+    if (!isDragging && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) isDragging = true;
+    if (isDragging) {
+      const face = modalPhoto.dets[dragFaceIdx];
+      if (iconImg && face.sel) {
+        face.dxPx = dragStart.dxPx + dx;
+        face.dyPx = dragStart.dyPx + dy;
+        mcv.style.cursor = 'grabbing';
+        drawModal();
+      }
+      return;
     }
-    mcv.style.cursor = (drawStart || hitFace(mx, my) < 0) ? 'crosshair' : 'pointer';
-  } else {
-    const idx = hitFace(mx, my);
-    mcv.style.cursor = idx >= 0 ? 'pointer' : 'default';
-    if (idx !== hovered) { hovered = idx; drawModal(); }
   }
+
+  // Draw mode rect drag
+  if (drawMode && drawStart) {
+    drawing = {
+      x: Math.min(mx, drawStart.mx), y: Math.min(my, drawStart.my),
+      w: Math.abs(mx - drawStart.mx), h: Math.abs(my - drawStart.my)
+    };
+    drawModal();
+    return;
+  }
+
+  // Hover / cursor update
+  const idx = hitFace(mx, my);
+  const gi  = hitGearBtn(mx, my);
+  const dl  = hitDeleteBtn(mx, my);
+  if (dl >= 0 || gi >= 0) {
+    mcv.style.cursor = 'pointer';
+  } else if (idx >= 0 && modalPhoto.dets[idx].sel && iconImg) {
+    mcv.style.cursor = 'grab';
+  } else if (idx >= 0) {
+    mcv.style.cursor = 'pointer';
+  } else {
+    mcv.style.cursor = drawMode ? 'crosshair' : 'default';
+  }
+  if (idx !== hovered || dl !== hoverDel) { hovered = idx; hoverDel = dl; drawModal(); }
 });
 
 mcv.addEventListener('mouseup', e => {
   if (!modalPhoto) return;
   const {mx, my} = getXY(e);
 
+  // ✕ 删除钮：按下和松开都在同一个钮上才执行删除
+  if (delArm >= 0) {
+    const di = hitDeleteBtn(mx, my);
+    if (di === delArm) deleteFace(di);
+    delArm = -1;
+    return;
+  }
+
+  // Draw mode: finalize rect
   if (drawMode && drawStart) {
     if (drawing && drawing.w > 25 && drawing.h > 25) {
       modalPhoto.dets.push({
@@ -794,40 +1155,162 @@ mcv.addEventListener('mouseup', e => {
     return;
   }
 
-  // Select mode: click to toggle
-  if (!drawMode) {
-    const idx = hitFace(mx, my);
-    if (idx >= 0) {
-      modalPhoto.dets[idx].sel = !modalPhoto.dets[idx].sel;
-      drawModal(); updateModalInfo();
+  // Drag ended on a selected face
+  if (dragFaceIdx >= 0) {
+    if (!isDragging) {
+      // Short movement = click: check gear first, then toggle
+      const gi = hitGearBtn(mx, my);
+      if (gi >= 0) {
+        adjustFaceIdx = (adjustFaceIdx === gi) ? -1 : gi;
+        updatePerFacePanel();
+      } else {
+        modalPhoto.dets[dragFaceIdx].sel = !modalPhoto.dets[dragFaceIdx].sel;
+        if (!modalPhoto.dets[dragFaceIdx].sel && adjustFaceIdx === dragFaceIdx) {
+          adjustFaceIdx = -1; updatePerFacePanel();
+        }
+        updateModalInfo();
+      }
     }
+    dragFaceIdx = -1; dragStart = null; isDragging = false;
+    mcv.style.cursor = drawMode ? 'crosshair' : 'default';
+    drawModal();
+    return;
+  }
+
+  // Click on empty area (no face hit) in either mode
+  const gi  = hitGearBtn(mx, my);
+  if (gi >= 0) {
+    adjustFaceIdx = (adjustFaceIdx === gi) ? -1 : gi;
+    updatePerFacePanel();
+    drawModal();
+    return;
+  }
+  if (!drawMode && adjustFaceIdx >= 0) {
+    // Clicked empty area while per-face panel open → auto-dismiss
+    adjustFaceIdx = -1;
+    updatePerFacePanel();
+    drawModal();
   }
 });
 
 mcv.addEventListener('mouseleave', () => {
-  if (hovered !== -1) { hovered = -1; drawModal(); }
+  delArm = -1;
+  if (dragFaceIdx >= 0 && isDragging) {
+    dragFaceIdx = -1; dragStart = null; isDragging = false;
+  }
+  if (hovered !== -1 || hoverDel !== -1) { hovered = -1; hoverDel = -1; drawModal(); }
 });
 
-// Right-click to delete any face box
+// Right-click to delete any face box (与 ✕ 按钮同一套逻辑，可撤销)
 mcv.addEventListener('contextmenu', e => {
   e.preventDefault();
   if (!modalPhoto) return;
   const {mx, my} = getXY(e);
   const idx = hitFace(mx, my);
   if (idx < 0) return;
-  modalPhoto.dets.splice(idx, 1);
-  if (hovered >= modalPhoto.dets.length) hovered = -1;
-  drawModal(); updateModalInfo();
+  deleteFace(idx);
 });
+
+/* ─── Delete face box + undo ─────────────────────────────────── */
+function deleteFace(i) {
+  if (!modalPhoto || i < 0 || i >= modalPhoto.dets.length) return;
+  const [det] = modalPhoto.dets.splice(i, 1);
+  undoStack.push({ det, index: i });
+  if (adjustFaceIdx === i) adjustFaceIdx = -1;
+  else if (adjustFaceIdx > i) adjustFaceIdx--;
+  updatePerFacePanel();
+  hovered = -1; hoverDel = -1; delArm = -1;
+  drawModal(); updateModalInfo();
+  showUndoToast();
+}
+
+function undoDelete() {
+  if (!modalPhoto || !undoStack.length) return;
+  const u = undoStack.pop();
+  const at = Math.min(u.index, modalPhoto.dets.length);
+  modalPhoto.dets.splice(at, 0, u.det);
+  if (adjustFaceIdx >= at) { adjustFaceIdx++; updatePerFacePanel(); }
+  drawModal(); updateModalInfo();
+  if (undoStack.length) showUndoToast(); else hideUndoToast();
+}
+
+function showUndoToast() {
+  document.getElementById('mundo-txt').textContent =
+    undoStack.length > 1 ? `已删除 ${undoStack.length} 个人脸框` : '已删除 1 个人脸框';
+  document.getElementById('mundo').classList.add('show');
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(hideUndoToast, 5000);
+}
+
+function hideUndoToast() {
+  clearTimeout(undoTimer);
+  document.getElementById('mundo').classList.remove('show');
+}
+
+/* ─── Per-face panel helpers ─────────────────────────────────── */
+function updatePerFacePanel() {
+  const panel = document.getElementById('mperface');
+  if (adjustFaceIdx < 0 || !modalPhoto) { panel.style.display = 'none'; return; }
+  const d  = modalPhoto.dets[adjustFaceIdx];
+  panel.style.display = 'block';
+  document.getElementById('mpfidx').textContent = adjustFaceIdx + 1;
+  const sv = d.scaleOv  ?? modalPhoto.stickerScale  ?? 120;
+  const ov = d.offsetOv ?? modalPhoto.stickerOffset ?? 10;
+  document.getElementById('mpfsr').value = sv;
+  document.getElementById('mpfsv').textContent = sv + '%';
+  document.getElementById('mpfor').value = ov;
+  document.getElementById('mpfov').textContent = ov + '%';
+}
+
+function resetPerFace() {
+  if (adjustFaceIdx < 0 || !modalPhoto) return;
+  delete modalPhoto.dets[adjustFaceIdx].scaleOv;
+  delete modalPhoto.dets[adjustFaceIdx].offsetOv;
+  updatePerFacePanel();
+  drawModal();
+}
+
+function resetFacePos() {
+  if (adjustFaceIdx < 0 || !modalPhoto) return;
+  delete modalPhoto.dets[adjustFaceIdx].dxPx;
+  delete modalPhoto.dets[adjustFaceIdx].dyPx;
+  drawModal();
+}
 
 /* ─── Modal slider live update ───────────────────────────────── */
 document.getElementById('msr').addEventListener('input', function() {
-  document.getElementById('msv').textContent = this.value + '%';
+  const newVal = parseFloat(this.value);
+  const delta  = newVal - prevGlobalScale;
+  prevGlobalScale = newVal;
+  document.getElementById('msv').textContent = newVal + '%';
+  // Apply delta to per-face scale overrides so they move with global
+  if (modalPhoto && delta !== 0) {
+    modalPhoto.dets.forEach(d => {
+      if (d.scaleOv != null) d.scaleOv = Math.max(40, Math.min(220, d.scaleOv + delta));
+    });
+    if (adjustFaceIdx >= 0) updatePerFacePanel();
+  }
   drawModal();
 });
 document.getElementById('mor').addEventListener('input', function() {
   document.getElementById('mov').textContent = this.value + '%';
   drawModal();
+});
+// Per-face size slider
+document.getElementById('mpfsr').addEventListener('input', function() {
+  document.getElementById('mpfsv').textContent = this.value + '%';
+  if (adjustFaceIdx >= 0 && modalPhoto) {
+    modalPhoto.dets[adjustFaceIdx].scaleOv = parseFloat(this.value);
+    drawModal();
+  }
+});
+// Per-face offset slider
+document.getElementById('mpfor').addEventListener('input', function() {
+  document.getElementById('mpfov').textContent = this.value + '%';
+  if (adjustFaceIdx >= 0 && modalPhoto) {
+    modalPhoto.dets[adjustFaceIdx].offsetOv = parseFloat(this.value);
+    drawModal();
+  }
 });
 
 /* ─── Confirm selection (modal → back to card) ───────────────── */
@@ -835,6 +1318,7 @@ mapplyBtn.onclick = () => {
   if (!modalPhoto) return;
   modalPhoto.stickerScale  = parseFloat(document.getElementById('msr').value);
   modalPhoto.stickerOffset = parseFloat(document.getElementById('mor').value);
+  adjustFaceIdx = -1;
   modalPhoto.status = 'confirmed';
   // Render preview immediately so card shows result right away
   if (iconImg) modalPhoto.previewCanvas = renderStickerCanvas(modalPhoto);
@@ -846,17 +1330,21 @@ mapplyBtn.onclick = () => {
 
 /* ─── Render sticker to canvas (shared helper) ───────────────── */
 function renderStickerCanvas(p) {
-  const scale  = (p.stickerScale  ?? 120) / 100;
-  const offPct = (p.stickerOffset ?? 10)  / 100;
+  const globalScale  = (p.stickerScale  ?? 120) / 100;
+  const globalOffPct = (p.stickerOffset ?? 10)  / 100;
   const cv  = document.createElement('canvas');
   cv.width  = p.img.naturalWidth;
   cv.height = p.img.naturalHeight;
   const ctx = cv.getContext('2d');
   ctx.drawImage(p.img, 0, 0);
   p.dets.filter(d => d.sel).forEach(d => {
+    const scale  = d.scaleOv  != null ? d.scaleOv  / 100 : globalScale;
+    const offPct = d.offsetOv != null ? d.offsetOv / 100 : globalOffPct;
     const iw = d.w * scale;
     const ih = iw * (iconImg.height / iconImg.width);
-    ctx.drawImage(iconImg, d.x + (d.w - iw)/2, d.y + (d.h - ih)/2 - d.h*offPct, iw, ih);
+    const ix = d.x + (d.w - iw)/2 + (d.dxPx ?? 0);
+    const iy = d.y + (d.h - ih)/2 - d.h * offPct + (d.dyPx ?? 0);
+    ctx.drawImage(iconImg, ix, iy, iw, ih);
   });
   return cv;
 }
@@ -896,8 +1384,14 @@ function refreshBtns() {
   document.getElementById('dlAll').disabled    = !photos.some(p => p.status==='done');
 }
 
-// Keyboard: Esc closes modal
-document.addEventListener('keydown', e => { if (e.key==='Escape') closeModal(); });
+// Keyboard: Esc closes modal; Ctrl/Cmd+Z undoes face-box deletion
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && modalPhoto) {
+    e.preventDefault();
+    undoDelete();
+  }
+});
 </script>
 <footer style="text-align:center;padding:18px;font-size:12px;color:#9ca3af;border-top:1px solid #e5e7eb;margin-top:8px;background:#fff;">
   Copyright © 黄馨萍 · All rights reserved
