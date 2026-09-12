@@ -16,6 +16,12 @@ npx serve .
 ```
 开发记录见 `devlog.html`。
 
+## 项目更新与AI实践
+
+微信搜索公众号 **「Pamela的AI笔记」** 或扫描下方二维码，获取项目更新、最新AI应用案例和实用教程。
+
+<img src="assets/pamela-ai-notes-wechat.png" alt="微信公众号「Pamela的AI笔记」二维码" width="800">
+
 ## 🧩 技术
 纯前端(HTML + JavaScript + 人脸检测),浏览器内运行。
 
